@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+{% set keys = modules | map(attribute='key') | list %}
+
+{% if 'hero' in keys %}
+<div class="hero">
+  <h1>{{ site.hero_title or site.site_title }}</h1>
+  <p>{{ site.hero_subtitle or site.site_description }}</p>
+  <form class="searchbar" action="{{ url_for('public.search') }}" method="get">
+    <input type="text" name="q" placeholder="搜索资源名称、简介、分类或标签…">
+    <button type="submit">搜索</button>
+  </form>
+  {% if site.hero_text %}<p class="small" style="margin-top:14px">{{ site.hero_text }}</p>{% endif %}
+</div>
+{% endif %}
+
+{% if 'announcement' in keys and announcements %}
+<section>
+  <div class="sec-head"><h2>公告</h2></div>
+  {% for a in announcements %}
+  <div class="notice">
+    <b>{% if a.pinned %}📌 {% endif %}{{ a.title }}</b>
+    <div class="small" style="white-space:pre-wrap">{{ a.content }}</div>
+    <div class="small muted" style="margin-top:5px">{{ a.published_at or a.created_at }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if 'categories' in keys and categories %}
+<section>
+  <div class="sec-head"><h2>分类</h2><a href="{{ url_for('public.categories') }}">全部 →</a></div>
+  <div class="cats">
+    {% for c in categories %}
+    <a class="cat" href="{{ url_for('public.category', slug=c.slug) }}">
+      <div class="ic">{{ c.icon or '📁' }}</div>
+      <div class="nm">{{ c.name }}</div>
+      <div class="ct">{{ c.resource_count }} 个资源</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if 'featured' in keys and featured %}
+<section>
+  <div class="sec-head"><h2>精选资源</h2></div>
+  <div class="cards">
+    {% for r in featured %}{% include "_card.html" %}{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if 'latest' in keys and latest %}
+<section>
+  <div class="sec-head"><h2>最新资源</h2><a href="{{ url_for('public.resources', order='latest') }}">更多 →</a></div>
+  <div class="rows">
+    {% for r in latest %}
+    <a class="row" href="{{ url_for('public.resource_detail', rid=r.id) }}">
+      <span class="nm">{{ r.title }}</span>
+      <span class="ct">{{ r.category.name if r.category else '未分类' }}</span>
+      <span class="tm">{{ (r.updated_at or '')[:10] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if 'popular' in keys and popular %}
+<section>
+  <div class="sec-head"><h2>热门资源</h2><a href="{{ url_for('public.resources', order='popular') }}">更多 →</a></div>
+  <div class="cards">
+    {% for r in popular %}{% include "_card.html" %}{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if 'tags' in keys and tags %}
+<section>
+  <div class="sec-head"><h2>标签</h2></div>
+  <div class="chips">
+    {% for t in tags %}
+    <a class="chip" href="{{ url_for('public.resources', tag=t.slug) }}">{{ t.name }} ({{ t.resource_count }})</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if not featured and not latest and not categories %}
+<div class="empty">
+  <p>还没有已发布的资源。</p>
+  <p class="small">管理员请登录 <a href="{{ url_for('admin.login') }}">后台</a> 选择 OpenList 目录并发布。</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+{% set keys = modules | map(attribute='key') | list %}
+
+{% if 'hero' in keys %}
+<div class="hero">
+  <h1>{% if site.hero_title %}{{ site.hero_title }}{% else %}<span class="hl">{{ site.site_title or '资源分享' }}</span>{% endif %}</h1>
+  <p>{{ site.hero_subtitle or site.site_description or '资源持续更新，按标签发现或直接搜索。' }}</p>
+  <form class="searchbar" action="{{ url_for('public.search') }}" method="get">
+    <input type="text" name="q" placeholder="搜索资源名称、简介或标签…" autocomplete="off">
+    <button type="submit">搜索</button>
+  </form>
+  {% if tags %}
+  <div class="hero-tips">
+    热门标签：
+    {% for t in tags[:6] %}<a href="{{ url_for('public.resources', tag=t.slug) }}">#{{ t.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% elif site.hero_text %}
+  <div class="hero-tips">{{ site.hero_text }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if 'announcement' in keys and announcements %}
+<section>
+  <div class="sec-head"><h2>公告</h2></div>
+  {% for a in announcements[:3] %}
+  <div class="notice">
+    <b>{% if a.pinned %}📌 {% endif %}{{ a.title }}</b>
+    <div class="body">{{ a.content }}</div>
+    <div class="when">{{ (a.published_at or a.created_at or '')[:16] }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if 'featured' in keys and featured %}
+<section>
+  <div class="sec-head"><h2>推荐资源</h2></div>
+  <div class="rec-grid">
+    {% for r in featured[:6] %}
+    <a class="rec" href="{{ url_for('public.resource_detail', rid=r.id) }}">
+      <div class="thumb" {% if r.cover %}style="background-image:url('{{ r.cover }}')"{% endif %}>
+        {%- if not r.cover -%}{{ (r.title or '?')[:1] }}{%- endif -%}
+      </div>
+      <div class="rb">
+        <div class="rt">{{ r.title }}</div>
+        <div class="rd">{{ (r.description or '') | truncate(58, true, '…') }}</div>
+        <div class="chips">
+          {% for t in (r.tags or [])[:3] %}<span class="chip">#{{ t.name }}</span>{% endfor %}
+        </div>
+        <div class="rm">{{ (r.updated_at or '')[:10] }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section>
+  <div class="sec-head">
+    <h2>最新发布</h2>
+    <span class="small muted">共 {{ total }} 个资源</span>
+  </div>
+  {% if latest %}
+  <div class="feed">
+    {% for r in latest %}{% include "_row.html" %}{% endfor %}
+  </div>
+
+  {% set pages = ((total + per_page - 1) // per_page) if per_page else 1 %}
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a href="{{ url_for('public.index') }}?page={{ page-1 }}">上一页</a>{% endif %}
+    <span class="cur">{{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="{{ url_for('public.index') }}?page={{ page+1 }}">下一页</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <div class="ic">🗂</div>
+    <p>还没有已发布的资源。</p>
+    <p class="small">管理员可通过后台「资源管理 → 新增资源」，选择 OpenList 目录并发布。</p>
+  </div>
+  {% endif %}
+</section>
+
+{% if 'tags' in keys and tags %}
+<section>
+  <div class="sec-head"><h2>标签</h2><a href="{{ url_for('public.tags') }}">全部标签 →</a></div>
+  <div class="chips">
+    {% for t in tags[:20] %}
+    <a class="chip" href="{{ url_for('public.resources', tag=t.slug) }}">#{{ t.name }} <span class="muted">{{ t.resource_count }}</span></a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

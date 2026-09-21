@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · {{ site.site_title or '资源分享' }}{% endblock %}
+{% block content %}
+<section>
+  <div class="sec-head">
+    <h2>{{ title }}</h2>
+    <span class="small muted">共 {{ total }} 个</span>
+  </div>
+  {% if subtitle %}<p class="muted small" style="margin-top:-6px">{{ subtitle }}</p>{% endif %}
+
+  {% if show_tagbar and tags %}
+  <div class="tagbar">
+    <a class="chip {% if not active_tag %}brand{% endif %}" href="{{ url_for('public.resources') }}">全部</a>
+    {% for t in tags %}
+    <a class="chip {% if active_tag == t.slug %}brand{% endif %}"
+       href="{{ url_for('public.resources', tag=t.slug) }}">#{{ t.name }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if resources %}
+  <div class="feed">
+    {% for r in resources %}{% include "_row.html" %}{% endfor %}
+  </div>
+
+  {% set pages = ((total + per_page - 1) // per_page) if per_page else 1 %}
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a href="{{ base_url }}?page={{ page-1 }}{% if q %}&q={{ q }}{% endif %}{% if order %}&order={{ order }}{% endif %}">上一页</a>{% endif %}
+    <span class="cur">{{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="{{ base_url }}?page={{ page+1 }}{% if q %}&q={{ q }}{% endif %}{% if order %}&order={{ order }}{% endif %}">下一页</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <div class="ic">{% if q %}🔍{% else %}🗂{% endif %}</div>
+    {% if q %}
+    <p>没有找到与「{{ q }}」相关的资源。</p>
+    <p class="small">换个关键词，或 <a href="{{ url_for('public.resources') }}">浏览全部资源</a>。</p>
+    {% else %}
+    <p>这里还没有已发布的资源。</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

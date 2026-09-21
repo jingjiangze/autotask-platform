@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台登录 · {{ site.site_title or '资源分享' }}</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+</head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<div style="width:340px;max-width:92vw">
+  <div class="card" style="padding:26px 24px">
+    <h2 style="margin:0 0 4px;font-size:19px">管理后台</h2>
+    <p class="small muted" style="margin:0 0 18px">{{ site.site_title or '资源分享' }}</p>
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    <form method="post">
+      <div class="field">
+        <label>管理口令</label>
+        <input type="password" name="password" autofocus required autocomplete="current-password">
+      </div>
+      <button class="btn" style="width:100%" type="submit">登录</button>
+    </form>
+    <p class="small muted" style="margin:16px 0 0">
+      口令存于本机，如需重置请删除 portal.db 中的 admin 哈希条目后重启服务。
+    </p>
+  </div>
+  <p class="small muted" style="text-align:center;margin-top:14px">
+    <a href="{{ url_for('public.index') }}">← 返回前台</a>
+  </p>
+</div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{% extends "admin/base.html" %}
+{% block title %}标签{% endblock %}
+{% block content %}
+<div class="page-head"><h1>标签管理</h1></div>
+<p class="small muted">标签在编辑资源时直接输入即可自动创建，这里用于查看与清理。</p>
+{% if items %}
+<table class="tb">
+  <tr><th>标签</th><th style="width:90px">Slug</th><th style="width:90px">资源数</th><th style="width:100px">操作</th></tr>
+  {% for t in items %}
+  <tr>
+    <td><b>{{ t.name }}</b></td>
+    <td class="muted small">{{ t.slug }}</td>
+    <td class="muted">{{ t.resource_count }}</td>
+    <td>
+      <form method="post" action="{{ url_for('admin.admin_tag_delete', tid=t.id) }}"
+            onsubmit="return confirm('删除标签？只解绑，不影响资源与文件。')">
+        <button class="btn sm danger" type="submit">删除</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty"><p>还没有标签。</p></div>
+{% endif %}
+{% endblock %}

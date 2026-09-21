@@ -1,0 +1,5 @@
+{
+  "api_token": "在这里粘贴你的 Cloudflare API Token",
+  "domain": "order.你的域名.com",
+  "port": 8766
+}

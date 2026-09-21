@@ -1,0 +1,181 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ '编辑资源' if rid else '新增资源' }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ '编辑资源' if rid else '新增资源' }}</h1>
+  <div class="sp actions">
+    <a class="btn sm ghost" href="{{ url_for('admin.resources') }}">← 返回列表</a>
+    {% if rid and r and r.status == 'published' %}
+    <a class="btn sm ghost" href="{{ url_for('public.resource_detail', rid=rid) }}" target="_blank">前台预览 ↗</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if warnings %}
+<div class="alert warn">
+  <b>⚠️ 目录路径包含可能敏感的命名：</b>{{ warnings | join('、') }}<br>
+  请确认该目录内确实没有 <code>密钥 / 订单 / 备份 / 配置 / Cookie</code> 等文件再发布。
+  <span class="muted">（这只是提示，最终由你确认）</span>
+</div>
+{% endif %}
+
+<form method="post">
+<div class="grid2">
+  <div>
+    <div class="field">
+      <label>资源标题 *</label>
+      <input type="text" name="title" required value="{{ (r.title if r else '') or '' }}">
+    </div>
+
+    <div class="field">
+      <label>OpenList 目录路径 *（只能从下方选择器选取，不接受 Windows 路径）</label>
+      <input type="text" name="openlist_path" id="ol_path" required
+             value="{{ (r.openlist_path if r else '') or '' }}"
+             placeholder="/quark/…" oninput="onPathInput()">
+      <div id="path_hint" class="small muted" style="margin-top:5px"></div>
+    </div>
+
+    <div class="picker">
+      <div class="bar">
+        <button class="btn sm ghost" type="button" onclick="loadDir('/')">根目录</button>
+        <button class="btn sm ghost" type="button" onclick="loadDir(curParent)">↑ 上一级</button>
+        <code id="cur_path">/</code>
+      </div>
+      <div class="list" id="dir_list"><div class="empty small">正在加载…</div></div>
+      <div class="bar" style="border-top:1px solid var(--line);border-bottom:0">
+        <button class="btn sm" type="button" onclick="pickCurrent()">选择此目录</button>
+        <span class="small muted">只显示目录；文件不列出</span>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:14px">
+      <label>简介</label>
+      <textarea name="description">{{ (r.description if r else '') or '' }}</textarea>
+    </div>
+  </div>
+
+  <div>
+    <div class="field">
+      <label>状态</label>
+      <select name="status">
+        {% set cur = (r.status if r else 'draft') %}
+        <option value="draft"     {% if cur=='draft' %}selected{% endif %}>草稿（不公开）</option>
+        <option value="published" {% if cur=='published' %}selected{% endif %}>已发布（公开）</option>
+        <option value="hidden"    {% if cur=='hidden' %}selected{% endif %}>已隐藏</option>
+        <option value="archived"  {% if cur=='archived' %}selected{% endif %}>已归档</option>
+      </select>
+      <div class="small muted" style="margin-top:5px">新建默认是草稿；选择「已发布」时后端会校验目录是否存在。</div>
+    </div>
+
+    <div class="field">
+      <label>分类</label>
+      <select name="category_id">
+        <option value="">（未分类）</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {% if r and r.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>标签（逗号或空格分隔）</label>
+      <input type="text" name="tags" value="{% if r and r.tags %}{{ r.tags | map(attribute='name') | join(', ') }}{% endif %}">
+    </div>
+
+    <div class="field">
+      <label>封面图 URL（可留空）</label>
+      <input type="text" name="cover" value="{{ (r.cover if r else '') or '' }}">
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>版本</label>
+        <input type="text" name="version" value="{{ (r.version if r else '') or '' }}">
+      </div>
+      <div class="field">
+        <label>排序（越小越前）</label>
+        <input type="number" name="sort_order" value="{{ (r.sort_order if r else 100) or 100 }}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>作者 / 来源</label>
+      <input type="text" name="author" value="{{ (r.author if r else '') or '' }}">
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" name="is_featured" style="width:auto"
+        {% if r and r.is_featured %}checked{% endif %}> 设为精选（首页精选位）</label>
+    </div>
+
+    <button class="btn" type="submit" style="width:100%">保存</button>
+
+    {% if rid %}
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+      <p class="small muted">危险操作（不会删除任何文件）</p>
+      <form method="post" action="{{ url_for('admin.resource_delete', rid=rid) }}"
+            onsubmit="return confirm('删除门户资源记录？\n\n仅删除门户 DB 记录，OpenList 目录与文件保持不变。')">
+        <button class="btn danger sm" type="submit">删除门户记录</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let curPath = '/', curParent = '/';
+const pathInput = document.getElementById('ol_path');
+
+async function loadDir(p) {
+  const box = document.getElementById('dir_list');
+  box.innerHTML = '<div class="empty small">加载中…</div>';
+  try {
+    const r = await fetch('/admin/api/openlist/directories?path=' + encodeURIComponent(p));
+    const j = await r.json();
+    if (!j.ok) { box.innerHTML = '<div class="empty small">无法读取：' + j.error + '</div>'; return; }
+    curPath = j.path; curParent = j.parent || '/';
+    document.getElementById('cur_path').textContent = curPath;
+    if (!j.directories.length) {
+      box.innerHTML = '<div class="empty small">（此目录下没有子目录）</div>'; return;
+    }
+    box.innerHTML = j.directories.map(d =>
+      '<div class="item" onclick="loadDir(\'' + d.path.replace(/'/g, "\\'") + '\')">📁 ' +
+      '<span>' + d.name + '</span></div>').join('');
+  } catch (e) {
+    box.innerHTML = '<div class="empty small">请求失败</div>';
+  }
+}
+
+function pickCurrent() {
+  pathInput.value = curPath;
+  onPathInput();
+}
+
+async function onPathInput() {
+  const p = pathInput.value.trim();
+  const hint = document.getElementById('path_hint');
+  if (!p.startsWith('/')) { hint.textContent = '路径必须以 / 开头'; return; }
+  hint.textContent = '校验中…';
+  try {
+    const r = await fetch('/admin/api/openlist/check?path=' + encodeURIComponent(p));
+    const j = await r.json();
+    if (!j.ok) { hint.innerHTML = '❌ 不可用：' + j.reason; return; }
+    var parts = ['✅ 目录可访问'];
+    if (j.warnings && j.warnings.length) parts.push('⚠️ 含敏感词：' + j.warnings.join('、'));
+    if (j.in_public_root) {
+      parts.push('公开链接：' + j.public_url);
+    } else {
+      parts.push('⚠️ <b>不在公开文件层范围内</b>（公开层根：' + (j.public_root || '未设置') +
+                 '），匿名访客将无法打开此资源');
+    }
+    hint.innerHTML = parts.join('<br>');
+  } catch (e) { hint.textContent = ''; }
+}
+
+{% if r and r.openlist_path %}curPath = '{{ r.openlist_path }}';{% endif %}
+loadDir(curPath);
+</script>
+{% endblock %}

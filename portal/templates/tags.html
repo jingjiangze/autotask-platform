@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}标签 · {{ site.site_title or '资源分享' }}{% endblock %}
+{% block content %}
+<section>
+  <div class="sec-head">
+    <h2>全部标签</h2>
+    <span class="small muted">共 {{ tags | length }} 个</span>
+  </div>
+  {% if tags %}
+  <div class="tag-grid">
+    {% for t in tags %}
+    <a class="tag-card" href="{{ url_for('public.resources', tag=t.slug) }}">
+      <div class="tn">{{ t.name }}</div>
+      <div class="tc">{{ t.resource_count }} 个资源</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="ic">🏷</div>
+    <p>还没有标签。</p>
+    <p class="small">在后台编辑资源时填写标签即可自动创建。</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,134 @@
+# ============================================================
+#  WorkBuddy 自动任务平台 · 仓库忽略规则
+#  原则：只提交「源码 + 文档 + 配置模板」。
+#        任何密钥、凭据、用户数据、隐私数据、二进制、日志一律不提交。
+#  最后更新：2026-09-21
+# ============================================================
+
+# ---------- 1. 密钥与凭据（最高优先级，绝不可提交） ----------
+secrets_store/
+private/
+*secret_key*
+*recovery_key*
+*admin_password*
+*admin_pw*
+*.zhs_cred
+.zhs_cred
+*credential*
+*token*.json
+
+# 引擎凭据（含明文账号口令 / 登录 cookie）
+fuckCourse/config.json
+fuckCourse/cookies*.json
+fuckCourse/.zhs_cred
+# 含硬编码真实账号口令的一次性调试脚本，不纳入仓库
+fuckCourse/debug_zhs_login.py
+fuckCourse/test_login.py
+**/debug_*login*.py
+**/probe_*login*.py
+**/test_login.py
+**/config.local.json
+
+# Cloudflare 凭据与状态
+cf/cf_config.json
+cf/cf_config.*.json
+!cf/cf_config.example.json
+cf/cf_state.json
+*.pem
+*cloudflared*.json
+*24f92801*.json
+.wrangler/
+
+# ---------- 1b. 运行时锁文件（被运行中的看护进程独占，无法索引） ----------
+*.lock
+*.lock.osl
+*.lock.*
+
+# ---------- 2. 用户数据与业务数据 ----------
+orders/
+backups/
+portal/data/
+portal/logs/
+maa_status/logs/
+maa_status/api2.json
+maa_status/config.json
+*.db
+*.db-wal
+*.db-shm
+
+# ---------- 3. 隐私数据（浏览器历史 / 浏览器配置） ----------
+_hist/
+cf/browser_profile/
+*.pma
+hist_*.db
+
+# ---------- 4. 开发残留与归档（可能含历史凭据） ----------
+_archive_dev/
+_hikejs/
+_onlineweb_js/
+*_旧实验残留*
+*_verify.txt
+
+# ---------- 5. 第三方上游参考仓库（非本项目代码） ----------
+#  fuckCourse 引擎为 GPLv3 上游代码，如需纳入请显式确认后再放开
+fuckZHS_orig/
+zhs_script/
+
+# ---------- 6. 二进制与打包产物 ----------
+*.exe
+*.dll
+*.so
+*.dylib
+*.zip
+*.tgz
+*.tar.gz
+*.whl
+*.bin
+tabler_pkg/
+
+# ---------- 7. 日志 ----------
+*.log
+logs/
+log/
+**/logs/
+
+# ---------- 8. Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------- 9. 编辑器 / 操作系统 ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 10. 手工备份与临时产物（保留规则在 .gitattributes 之外） ----------
+*.bak
+*.bak_*
+*.backup
+*_backup.py
+*.tmp
+*.temp
+~$*
+.tmp/
+tmp/
+temp/
+
+# ---------- 11. AI 会话与工具残留 ----------
+.workbuddy/
+.workbuddy/*
+!.workbuddy/memory/
+.claude/

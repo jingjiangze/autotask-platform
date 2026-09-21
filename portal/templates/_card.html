@@ -1,0 +1,13 @@
+<a class="card" href="{{ url_for('public.resource_detail', rid=r.id) }}">
+  <div class="cover" {% if r.cover %}style="background-image:url('{{ r.cover }}')"{% else %}>{{ (r.category.icon if r.category else '📦') }}{% endif %}</div>
+  <div class="body">
+    <div class="t">{{ r.title }}</div>
+    <div class="d">{{ (r.description or '')[:70] }}</div>
+    <div class="meta">
+      {% if r.category %}<span class="chip brand">{{ r.category.name }}</span>{% endif %}
+      {% for t in (r.tags or [])[:2] %}<span class="chip">{{ t.name }}</span>{% endfor %}
+    </div>
+    <div class="meta"><span>{{ (r.updated_at or '')[:10] }}</span>
+      {% if r.is_featured %}<span>· 精选</span>{% endif %}</div>
+  </div>
+</a>
