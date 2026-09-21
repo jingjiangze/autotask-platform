@@ -47,14 +47,15 @@ cf/cf_state.json
 # ---------- 2. 用户数据与业务数据 ----------
 orders/
 backups/
-portal/data/
-portal/logs/
-maa_status/logs/
-maa_status/api2.json
-maa_status/config.json
 *.db
 *.db-wal
 *.db-shm
+
+# ---------- 2b. 非本仓库范围（独立项目，另行建库） ----------
+#  portal   = OpenList 网盘门户（独立产品）
+#  maa_status = MAA 明日方舟状态采集（独立产品）
+portal/
+maa_status/
 
 # ---------- 3. 隐私数据（浏览器历史 / 浏览器配置） ----------
 _hist/

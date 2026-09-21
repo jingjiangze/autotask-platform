@@ -61,7 +61,7 @@ D:\web
 │   └── __pycache__\
 ├── tests\   test_crypto / test_health / test_kill_tree / test_restore_drill / test_spawn_timeout
 ├── fuckCourse\   chaoxing\ zhs\ qr\ welearn\ yuketang\ logs\ config.json(含明文凭据脱敏)
-│                 cookies.json / .zhs_cred / cookies_13375472780.json(敏感残留) / run_zhs.py
+│                 cookies.json / .zhs_cred / cookies_13000000000.json(敏感残留) / run_zhs.py
 ├── static\ + tabler_pkg\            Tabler 1.5.1 本地 UI（不依赖外网 CDN）
 ├── zhs_script\ fuckZHS_orig\       上游参考仓库
 ├── _archive_dev\                    189 个开发残留归档（22MB，含口令推断材料）
@@ -326,7 +326,7 @@ settings(key TEXT PRIMARY KEY, value TEXT)
 | SECRET（会话+加密密钥基） | secrets_store\secret_key.txt（首启随机） | 文件 | hash_pw/登录/encrypt/decrypt | 否 | 否 | 否 | 否 |
 | 订单密码密文 | 下单时 encrypt_secret | orders.password（enc:v1:） | worker 解密→env 传引擎 | 否 | 是（密文） | 否 | 否 |
 | 订单 cookies.json | 引擎/扫码写 | orders\<id>\cookies.json（明文 JSON） | 引擎/扫码查课 | 否 | 否 | 否 | 否（无下载路由） |
-| 引擎全局 cookies | fuckCourse\cookies.json + cookies_13375472780.json（手机号为名，敏感残留） | 文件 | 引擎 config use_cookies | 否 | 否 | 否 | 否 |
+| 引擎全局 cookies | fuckCourse\cookies.json + cookies_13000000000.json（手机号为名，敏感残留） | 文件 | 引擎 config use_cookies | 否 | 否 | 否 | 否 |
 | 引擎 .zhs_cred | 引擎内部 | 文件 | zhs | 否 | 否 | 否 | 否 |
 | 引擎 config.json | 库内 | 文件 | 引擎（chaoxing.common 含明文账号口令，**脱敏**；pushplus.token 空、bark 占位、openai/moonshot key=“sk-”占位） | 否 | 否 | 否 | 否 |
 | CF 隧道凭据 | %USERPROFILE%\.cloudflared\{wk_config.yml, cert.pem, 24f…json} | 文件 | cloudflared | 否 | 否 | 否 | 否 |
@@ -533,7 +533,7 @@ Windows 登录/计划任务触发(Logon + 5min)
 | Tunnel | 唯一出网 | §30 |
 | 限流 | 4 入口 | §7 |
 | 其它 | cookie 无 Secure/HttpOnly 已设 HttpOnly（set_cookie httponly=True h1606）无 path/domain 限定；SECRET 轮换风险；静态盐 | §8/§21 |
-| 已知残留文件 | fuckCourse\cookies_13375472780.json、config.json 明文引擎凭据 | §21 |
+| 已知残留文件 | fuckCourse\cookies_13000000000.json、config.json 明文引擎凭据 | §21 |
 
 ## 37. 资源管理
 

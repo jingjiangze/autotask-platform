@@ -144,7 +144,7 @@ pythonw.exe order_platform.py（常驻）          ← 全部 worker 均为其�
 | platform.db / WAL | 正常 checkpoint | ✅ |
 | QR_SESSIONS | qr_janitor 120s 清理 | ✅ |
 | **根目录 _*.log/_*.txt/_*.py 调试残留 + 4 个 zip/tgz（合计 >20MB）** | **无清理** | ❌ P3 需归档 |
-| **fuckCourse/cookies_13375472780.json（明文 cookie，文件名为手机号）** | **无清理** | ❌ P3 敏感残留 |
+| **fuckCourse/cookies_13000000000.json（明文 cookie，文件名为手机号）** | **无清理** | ❌ P3 敏感残留 |
 
 ## 四、线程关系
 
@@ -189,7 +189,7 @@ waiting_qr ─过期/取消/异常──▶ canceled（qr_thread 已写终态 �
 
 ## 八、文件生命周期
 
-见 6.17 表。补充：`orders/<id>/cookies.json` 含平台登录态（随目录 3 天删除）；fuckCourse 内部 `config.json`（**含引擎自身明文账号口令**，属引擎既有配置文件，按边界不触碰但需知悉风险）、`.zhs_cred`、`cookies_13375472780.json` 属**敏感残留**（P3）；根目录大量调试产物（P3）。
+见 6.17 表。补充：`orders/<id>/cookies.json` 含平台登录态（随目录 3 天删除）；fuckCourse 内部 `config.json`（**含引擎自身明文账号口令**，属引擎既有配置文件，按边界不触碰但需知悉风险）、`.zhs_cred`、`cookies_13000000000.json` 属**敏感残留**（P3）；根目录大量调试产物（P3）。
 
 ## 九、启动流程（当前）
 
@@ -266,7 +266,7 @@ waiting_qr ─过期/取消/异常──▶ canceled（qr_thread 已写终态 �
 ## 十六、数据丢失风险
 
 D1 备份：每日在线备份 + integrity_check + 保留 7 份（backups/ 现 7 份，最近 09-13 18:40）✅；restore 走 SQLite backup API 反向覆盖（已实测演练）✅。
-D2 残留明文：DB 内密码已全加密 ✅；但 **fuckCourse/config.json 存量明文引擎凭据**（不触碰区）、fuckCourse/cookies_13375472780.json 明文 cookie（P3 清理）仍存在。
+D2 残留明文：DB 内密码已全加密 ✅；但 **fuckCourse/config.json 存量明文引擎凭据**（不触碰区）、fuckCourse/cookies_13000000000.json 明文 cookie（P3 清理）仍存在。
 D3 时间戳格式混合（无年份旧行）→ 审计/排序失真（P3）。
 D4 cloudflared 凭据：`%USERPROFILE%\.cloudflared\{cert.pem, 24f92801….json, wk_config.yml}` 含隧道账号凭据——在用户目录而非项目目录，泄露面=本账户；维持。
 
@@ -339,7 +339,7 @@ T6 备份只在平台进程内调度 → 停机断更（R5，P2）。
 ### P3 —— 低优先级
 - loguru dated 日志加大小上限（R6）
 - 根目录 `_*.log/_*.txt/_*.py` 与 4 个 zip/tgz 归档清理
-- `fuckCourse/cookies_13375472780.json`、根目录口令推断类调试文件归档
+- `fuckCourse/cookies_13000000000.json`、根目录口令推断类调试文件归档
 - /qr 鉴权补齐（可选）；/query 前缀枚举保护（可选）
 - stop.bat/优雅停机；模块化（process_manager 等按需）
 - order_platform_v5_backup.py 与当前库同路径提示（勿运行）

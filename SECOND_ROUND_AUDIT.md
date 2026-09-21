@@ -62,7 +62,7 @@
 ## P1 —— 明显风险
 
 - **P1-1 XSS（存储型，经日志）**：`order_detail` 将 `log.txt` 尾 8KB 直接嵌入 HTML（h1303-1308），未转义；引擎输出若含 HTML/引号（引擎打印账号名等）可注入脚本；`note`、`username`、二维码状态等页面同样 f-string 直插（h899 模板），无 CSP 头，无转义函数。
-- **P1-2 敏感明文残留**：`fuckCourse\config.json`（chaoxing.common 明文账号口令）、`cookies_13375472780.json`（手机号命名的明文 cookie）、`.zhs_cred`、`_archive_dev`（含口令推断材料，无 ACL）。均非 static/Web 可达，但本机共享风险存在。
+- **P1-2 敏感明文残留**：`fuckCourse\config.json`（chaoxing.common 明文账号口令）、`cookies_13000000000.json`（手机号命名的明文 cookie）、`.zhs_cred`、`_archive_dev`（含口令推断材料，无 ACL）。均非 static/Web 可达，但本机共享风险存在。
 - **P1-3 限流 IP 可伪造**：`rate_limit` h308-311 取 `CF-Connecting-IP` 头优先；直接访问 127.0.0.1 时可伪造该头绕过限流（公网经 CF 会被重写，风险集中于本机/内网场景）。
 - **P1-4 backup restore 在线执行无防护**：`restore_database` h78 会反向覆盖线上库；若 platform 在线写入并发 → 目标库锁冲突（busy_timeout=5s 默认）可能失败或产生半写窗口；README 仅"建议停机"。
 - **P1-5 引擎日志无脱敏**：订单 log.txt 记录引擎原样输出（含账号名），3 天清理期内本机可读；无 token 证据但无审计保证。

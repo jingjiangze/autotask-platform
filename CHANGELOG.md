@@ -244,7 +244,7 @@ orders 表 created_at/started_at/finished_at 存量 57 项补全年份（+2026-�
 ## 第二轮修复（剩余 P1）｜ 2026-09-14
 | 项 | 文件 | 修改 |
 |---|---|---|
-| P1-2 明文残留 | 文件整理 | uckCourse\cookies_13375472780.json（无代码引用）→ _archive_dev；_admin_pw_verify.txt / _set_admin_pw.py / _verify_admin_pw.py / _test_zhs_cookie.py / _zhs_cookie_test.txt（口令推断材料）→ secrets_store\_archive_dev（更安全位置，同旧先例）；uckCourse\config.json 与 .zhs_cred 为引擎运行时依赖，**保留**（边界） |
+| P1-2 明文残留 | 文件整理 | uckCourse\cookies_13000000000.json（无代码引用）→ _archive_dev；_admin_pw_verify.txt / _set_admin_pw.py / _verify_admin_pw.py / _test_zhs_cookie.py / _zhs_cookie_test.txt（口令推断材料）→ secrets_store\_archive_dev（更安全位置，同旧先例）；uckCourse\config.json 与 .zhs_cred 为引擎运行时依赖，**保留**（边界） |
 | P1-3 限流 IP | order_platform.py ate_limit | IP 信任策略：仅当对端=回环（经本机 cloudflared 回源）才取 CF-Connecting-IP（CF 边缘设置、不可伪造）；其余来源一律用 TCP 对端地址，杜绝伪造头部绕过公网限流 |
 | P1-4 restore 在线防护 | backup_manager.py | 新增 _platform_online()（8766 探测）；estore_database 平台在线时**拒绝**（报错提示先停平台）；支持 estore <文件> --force（演练/停机后） |
 | P1-5 日志脱敏 | order_platform.py RollingLog._scrub | 订单 log.txt 落盘前正则遮蔽 password/pwd/passwd/token/api_key/secret/authorization <sep> <值> → 字段=<sep>****；仅平台侧写盘，不动引擎；白名单外（speed 等）不误伤 |

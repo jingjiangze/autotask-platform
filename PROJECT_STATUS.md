@@ -68,7 +68,7 @@ D:\web
 │   └── __pycache__\
 ├── tests\   test_crypto / test_health / test_kill_tree / test_restore_drill / test_spawn_timeout
 ├── fuckCourse\  chaoxing/ zhs/ logs/ qr/ welearn/ yuketang/ config.json(明文凭据)/
-│                cookies.json / .zhs_cred / cookies_13375472780.json(敏感残留P3) / main.py(已R4 patch)
+│                cookies.json / .zhs_cred / cookies_13000000000.json(敏感残留P3) / main.py(已R4 patch)
 ├── static\ + tabler_pkg\   Tabler 1.5.1 本地 UI
 ├── zhs_script\ fuckZHS_orig\  上游参考仓库
 ├── _archive_dev\   189 个开发残留归档（22MB，含口令推断材料，可还原）
@@ -121,7 +121,7 @@ waiting_qr → 扫码成功→pending ；过期/取消→canceled
 - CSRF：全站 POST 同源校验（Origin/Referer，双 scheme 兼容 CF，无头客户端放行）——**无 token，属设计取舍**
 - 限流：login 10/min、register 5/min、api_courses 12/min、qr_start 6/min（内存计数，>5000 key 清空）
 - 敏感文件：secrets_store 单独目录；根目录残留已归档
-- 明文残留点（有意保留/标注）：fuckCourse\config.json 引擎凭据、cookies_13375472780.json、.zhs_cred、cf 隧道凭据在 %USERPROFILE%\.cloudflared
+- 明文残留点（有意保留/标注）：fuckCourse\config.json 引擎凭据、cookies_13000000000.json、.zhs_cred、cf 隧道凭据在 %USERPROFILE%\.cloudflared
 - 已知低危：/query 前缀 LIKE 枚举（uuid4）；引擎 INFO 级无条件 print 账号名（3 天清理期）
 
 ## 8. 当前运行状态快照（2026-09-14 11:3x 实测）

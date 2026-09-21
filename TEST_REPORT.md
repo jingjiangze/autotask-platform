@@ -136,7 +136,7 @@ backup ✅（含校验）；restore 逻辑就绪（校验源→恢复前自动�
 - RollingLog._scrub：password/token/api_key/secret/Authorization 值遮蔽、保留分隔符、非敏感字段不误伤——6 用例 PASS
 - backup restore 在线防护：平台在线调用 → RuntimeError 拦截 ✅；--force 放行 ✅
 - rate_limit IP 策略：代码静态核验（回环才信 CF 头）✅
-- 敏感文件：5 个口令材料文件移至 secrets_store\_archive_dev；cookies_13375472780.json 归档；config.json/.zhs_cred 保留并标注
+- 敏感文件：5 个口令材料文件移至 secrets_store\_archive_dev；cookies_13000000000.json 归档；config.json/.zhs_cred 保留并标注
 
 ## 第二轮 P2 测试（2026-09-14）
 - _QUERY_SLOT：BoundedSemaphore(2) acquire 2 成功、第 3 次阻塞、release 后恢复 —— 语义单测 PASS（未触达真实第三方查询）
