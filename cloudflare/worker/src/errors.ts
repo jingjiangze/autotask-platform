@@ -18,6 +18,10 @@ export const ERROR_CODES = {
   EXECUTOR_AUTH_FAILED: "Executor authentication failed",
   EXECUTOR_DISABLED: "Executor is disabled",
   EXECUTOR_PATH_MISMATCH: "Executor is not allowed on this execution path",
+  // stage-cloud-11：凭据边界
+  FORBIDDEN: "Insufficient permissions",
+  LEASE_INVALID: "Unknown task or invalid lease",
+  CREDENTIAL_DECRYPT_FAILED: "Credential decryption failed",
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CODES;

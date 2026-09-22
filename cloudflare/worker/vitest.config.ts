@@ -13,6 +13,10 @@ export default defineConfig({
         bindings: {
           LEGACY_HMAC_SECRET: "test-legacy-secret",
           EXECUTOR_BOOTSTRAP_TOKEN: "test-bootstrap-token",
+          // stage-cloud-11：32 字节测试密钥（base64）
+          CREDENTIAL_KEY: btoa(
+            String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),
+          ),
         },
       },
     }),

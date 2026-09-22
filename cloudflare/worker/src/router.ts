@@ -19,6 +19,8 @@ import {
   executorHeartbeat,
 } from "./executors/executor-api";
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
+import { getSessionUser } from "./auth/session-service";
+import { releaseCredentials, storeCredential } from "./credentials/credential-service";
 
 export { ERROR_CODES, errorResponse };
 export type { ErrorCode };
@@ -53,6 +55,8 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     ack: executorAck,
     heartbeat: executorHeartbeat,
     complete: executorComplete,
+    // stage-cloud-11：凭据解封（租约门控）
+    credentials: releaseCredentials,
   };
   if (pathname.startsWith("/api/executor/v1/")) {
     const action = pathname.slice("/api/executor/v1/".length);
@@ -61,6 +65,14 @@ export async function route(request: Request, env: Env): Promise<Response | unde
       if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
       return handler(env, request);
     }
+  }
+  // stage-cloud-11：管理端凭据写入（admin session 门控）
+  if (pathname === "/api/v1/admin/credentials") {
+    if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    const session = await getSessionUser(env.DB, request);
+    if (!session) return errorResponse(401, "AUTH_REQUIRED");
+    if (session.role !== "admin") return errorResponse(403, "FORBIDDEN");
+    return storeCredential(env, request);
   }
   return undefined; // 未匹配 —— 交回 index 处理 /health 与 404
 }

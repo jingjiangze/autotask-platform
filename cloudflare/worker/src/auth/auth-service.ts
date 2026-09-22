@@ -31,6 +31,8 @@ export interface Env {
   EXECUTOR_BOOTSTRAP_TOKEN?: string;
   /** stage-cloud-09：调度中枢 DO（每 execution_path 一个实例） */
   COORDINATOR: DurableObjectNamespace;
+  /** stage-cloud-11：凭据主密钥（base64 32B）；生产经 wrangler secret 注入 */
+  CREDENTIAL_KEY?: string;
 }
 
 export type Json = Record<string, unknown>;

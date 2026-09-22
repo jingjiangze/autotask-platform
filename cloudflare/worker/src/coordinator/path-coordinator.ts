@@ -67,6 +67,7 @@ type CoordMessage =
       error_code?: string;
     }
   | { type: "requeue"; task_id: string }
+  | { type: "verify-lease"; task_id: string; lease_id: string }
   | { type: "stats" };
 
 function fail(code: string, message: string): Response {
@@ -133,6 +134,8 @@ export class PathCoordinator implements DurableObject {
         return this.complete(msg);
       case "requeue":
         return this.requeue(msg.task_id, Date.now());
+      case "verify-lease":
+        return this.verifyLease(msg.task_id, msg.lease_id);
       case "stats":
         return this.stats();
       default:
@@ -327,6 +330,26 @@ export class PathCoordinator implements DurableObject {
     if (current === null || current > earliest) {
       await this.storage.setAlarm(earliest);
     }
+  }
+
+  /** stage-cloud-11：凭据解封前置校验 —— 租约存在、匹配、未过期且处于活跃态。 */
+  private async verifyLease(taskId: string, leaseId: string): Promise<Response> {
+    const t = await this.getTask(taskId);
+    if (!t || t.lease_id !== leaseId) {
+      return Response.json({ ok: true, valid: false, reason: "LEASE_MISMATCH" });
+    }
+    if (!["leased", "running"].includes(t.status)) {
+      return Response.json({ ok: true, valid: false, reason: `STATUS_${t.status}` });
+    }
+    if (t.lease_expires_at !== null && t.lease_expires_at <= Date.now()) {
+      return Response.json({ ok: true, valid: false, reason: "LEASE_EXPIRED" });
+    }
+    return Response.json({
+      ok: true,
+      valid: true,
+      order_id: t.order_id,
+      lease_expires_at: t.lease_expires_at,
+    });
   }
 
   private async stats(): Promise<Response> {
