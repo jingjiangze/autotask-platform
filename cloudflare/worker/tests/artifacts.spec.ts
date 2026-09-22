@@ -100,7 +100,10 @@ function upload(
   });
 }
 
-async function mkLogin(name: string, password: string): Promise<string> {
+async function mkUser(
+  name: string,
+  password: string,
+): Promise<{ cookie: string; id: string }> {
   await SELF.fetch(`${BASE}/api/v1/auth/register`, {
     method: "POST",
     body: JSON.stringify({ username: name, password }),
@@ -109,7 +112,11 @@ async function mkLogin(name: string, password: string): Promise<string> {
     method: "POST",
     body: JSON.stringify({ username: name, password }),
   });
-  return login.headers.get("Set-Cookie")!.split(";")[0]!;
+  const cookie = login.headers.get("Set-Cookie")!.split(";")[0]!;
+  const row = await DB.prepare("SELECT id FROM users WHERE username=?")
+    .bind(name)
+    .first<{ id: string }>();
+  return { cookie, id: row!.id };
 }
 
 beforeEach(async () => {
@@ -180,32 +187,35 @@ describe("stage-cloud-14 artifact pipeline", () => {
   });
 
   it("download: owner + admin OK, stranger 404, content matches", async () => {
-    await seedOrder("ord-r3", "u-r3");
+    const owner = await mkUser("owner3", "owner-pass-123");
+    const admin = await mkUser("admin3", "admin-pass-1234");
+    await DB.prepare("UPDATE users SET role='admin' WHERE username='admin3'").run();
+    await seedOrder("ord-r3", owner.id);
+
     const token = await registerExecutor("exec-internal-14", "internal");
     const lease = await enqueueAndClaim(token, "t-r3", "ord-r3");
     const up = await upload(token, lease);
     const { artifact_id } = (await up.json()) as { artifact_id: string };
 
-    const ownerCookie = await mkLogin("u-u-r3", "owner-pass-123");
-    // 所有者是 u-r3（seedOrder 建的占位用户），改密后登录拿会话不便 —— 用 admin 校验 + 越权校验
-    await DB.prepare(
-      "UPDATE users SET password_hash='pbkdf2-sha256-v1$20000$AA$BB', username='owner3' WHERE id='u-r3'",
-    ).run();
-
-    const strangerCookie = await mkLogin("stranger3", "stranger-pass-1");
+    const strangerCookie = (await mkUser("stranger3", "stranger-pass-1")).cookie;
     const stranger = await SELF.fetch(
       `${BASE}/api/v1/orders/ord-r3/artifacts/${artifact_id}`,
       { headers: { Cookie: strangerCookie } },
     );
     expect(stranger.status).toBe(404);
 
-    const admin = await mkLogin("admin3", "admin-pass-1234");
-    await DB.prepare("UPDATE users SET role='admin' WHERE username='admin3'").run();
-    const ok = await SELF.fetch(`${BASE}/api/v1/orders/ord-r3/artifacts/${artifact_id}`, {
-      headers: { Cookie: admin },
-    });
+    const ownerRes = await SELF.fetch(
+      `${BASE}/api/v1/orders/ord-r3/artifacts/${artifact_id}`,
+      { headers: { Cookie: owner.cookie } },
+    );
+    expect(ownerRes.status).toBe(200);
+    expect(await ownerRes.text()).toBe(CONTENT);
+
+    const ok = await SELF.fetch(
+      `${BASE}/api/v1/orders/ord-r3/artifacts/${artifact_id}`,
+      { headers: { Cookie: admin.cookie } },
+    );
     expect(ok.status).toBe(200);
     expect(await ok.text()).toBe(CONTENT);
-    void ownerCookie;
   });
 });
