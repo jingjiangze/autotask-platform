@@ -44,12 +44,13 @@ class CentralClient:
 
     # ---- low level ----
     def _post(self, path: str, payload: dict[str, Any] | None = None,
-              raw: bytes | None = None, query: dict[str, str] | None = None) -> tuple[int, Any]:
+              raw: bytes | None = None, query: dict[str, str] | None = None,
+              content_type: str | None = None) -> tuple[int, Any]:
         url = f"{self.base_url}{path}"
         if query:
             from urllib.parse import urlencode
             url += "?" + urlencode(query)
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": content_type or "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         body = raw if raw is not None else json.dumps(payload or {}).encode()
@@ -124,7 +125,8 @@ class CentralClient:
             "artifact_type": artifact_type,
             "content_type": content_type,
         }
-        status, body = self._post("/api/executor/v1/artifacts", raw=content, query=query)
+        status, body = self._post("/api/executor/v1/artifacts", raw=content, query=query,
+                                  content_type=content_type)
         if status != 201:
             raise RuntimeError(f"artifact upload failed: {status} {body}")
         return body
