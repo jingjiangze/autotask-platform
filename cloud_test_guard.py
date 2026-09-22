@@ -11,6 +11,7 @@ cannot be verified, the cloud-test process must not start.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import socket
 import subprocess
