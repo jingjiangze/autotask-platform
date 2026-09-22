@@ -11,6 +11,13 @@ export const ERROR_CODES = {
   INVALID_CREDENTIALS: "Invalid username or password",
   USERNAME_TAKEN: "Username already registered",
   VALIDATION_FAILED: "Request validation failed",
+  // stage-cloud-08：Executor 注册 / 认证（§39/§40/§82）
+  BOOTSTRAP_DISABLED: "Executor bootstrap registration is disabled",
+  BOOTSTRAP_INVALID: "Invalid bootstrap token",
+  EXECUTOR_EXISTS: "Executor id already registered",
+  EXECUTOR_AUTH_FAILED: "Executor authentication failed",
+  EXECUTOR_DISABLED: "Executor is disabled",
+  EXECUTOR_PATH_MISMATCH: "Executor is not allowed on this execution path",
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CODES;

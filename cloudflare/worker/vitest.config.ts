@@ -8,8 +8,13 @@ export default defineConfig({
     cloudflareTest({
       main: "src/index.ts",
       wrangler: { configPath: "./wrangler.jsonc" },
-      // stage-cloud-06：legacy 迁移密钥只在测试环境注入（生产留空 = 无 legacy 能力）
-      miniflare: { bindings: { LEGACY_HMAC_SECRET: "test-legacy-secret" } },
+      // stage-cloud-06/08：测试专用绑定（生产通过 wrangler secret 注入）
+      miniflare: {
+        bindings: {
+          LEGACY_HMAC_SECRET: "test-legacy-secret",
+          EXECUTOR_BOOTSTRAP_TOKEN: "test-bootstrap-token",
+        },
+      },
     }),
   ],
   test: {

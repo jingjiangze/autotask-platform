@@ -27,6 +27,8 @@ export interface Env {
   SESSION_TTL_SECONDS?: string;
   /** stage-cloud-06：legacy 迁移期专用，仅迁移工具/受控环境注入；生产部署留空 */
   LEGACY_HMAC_SECRET?: string;
+  /** stage-cloud-08：Executor 一次性 bootstrap 注册 token（§39）；未配置 = 注册关闭 */
+  EXECUTOR_BOOTSTRAP_TOKEN?: string;
 }
 
 export type Json = Record<string, unknown>;
