@@ -167,3 +167,81 @@ describe("stage-cloud-05 central auth", () => {
     expect(health.status).toBe(200);
   });
 });
+
+describe("stage-cloud-06 legacy auth compatibility", () => {
+  // 模拟迁移工具导入的 legacy 用户：本地算法 HMAC-SHA256(SECRET, "wk"+pw)
+  async function importLegacyUser(username: string, password: string): Promise<void> {
+    const secret = "test-legacy-secret";
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode("wk" + password),
+    );
+    const hash = [...new Uint8Array(sig)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    await DB.prepare(
+      "INSERT INTO users(id,username,password_hash,password_scheme,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+    )
+      .bind(crypto.randomUUID(), username, hash, "legacy-hmac-v1", Date.now(), Date.now())
+      .run();
+  }
+
+  it("legacy imported user logs in; scheme upgraded to pbkdf2 after first success", async () => {
+    await importLegacyUser("legacy_alice", "old-local-pass-1");
+    const id = (
+      await DB.prepare("SELECT id FROM users WHERE username='legacy_alice'").first<{
+        id: string;
+      }>()
+    )!.id;
+
+    // 第一次登录：legacy 验证成功 → 升级
+    const res = await login("legacy_alice", "old-local-pass-1");
+    expect(res.status).toBe(200);
+    const row = await DB.prepare(
+      "SELECT password_scheme, password_hash FROM users WHERE id=?",
+    )
+      .bind(id)
+      .first<{ password_scheme: string; password_hash: string }>();
+    expect(row?.password_scheme).toBe("pbkdf2-sha256-v1");
+    expect(row?.password_hash.startsWith("pbkdf2-sha256-v1$")).toBe(true);
+    expect(row?.password_hash).not.toContain("old-local-pass-1");
+
+    // 第二次登录：走 pbkdf2 常规路径
+    const res2 = await login("legacy_alice", "old-local-pass-1");
+    expect(res2.status).toBe(200);
+    const row2 = await DB.prepare(
+      "SELECT password_scheme FROM users WHERE id=?",
+    )
+      .bind(id)
+      .first<{ password_scheme: string }>();
+    expect(row2?.password_scheme).toBe("pbkdf2-sha256-v1");
+  });
+
+  it("legacy user with wrong password → 401, scheme untouched", async () => {
+    await importLegacyUser("legacy_bob", "old-local-pass-2");
+    const res = await login("legacy_bob", "wrong-pass-99");
+    expect(res.status).toBe(401);
+    const row = await DB.prepare(
+      "SELECT password_scheme FROM users WHERE username='legacy_bob'",
+    ).first<{ password_scheme: string }>();
+    expect(row?.password_scheme).toBe("legacy-hmac-v1");
+  });
+
+  it("unknown scheme → DENY even with secret present", async () => {
+    await DB.prepare(
+      "INSERT INTO users(id,username,password_hash,password_scheme,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+    )
+      .bind(crypto.randomUUID(), "legacy_ghost", "deadbeef", "bcrypt-unknown", Date.now(), Date.now())
+      .run();
+    const res = await login("legacy_ghost", "whatever-pass");
+    expect(res.status).toBe(401);
+  });
+});

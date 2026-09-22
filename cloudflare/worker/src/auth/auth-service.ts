@@ -6,7 +6,13 @@
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
-import { hashPassword, verifyPassword } from "./password-compat";
+import {
+  LEGACY_SCHEME,
+  SCHEME,
+  hashPassword,
+  verifyLegacyHmac,
+  verifyPassword,
+} from "./password-compat";
 import {
   createSession,
   getSessionUser,
@@ -19,6 +25,8 @@ const MIN_PASSWORD_LEN = 8;
 export interface Env {
   DB: D1Database;
   SESSION_TTL_SECONDS?: string;
+  /** stage-cloud-06：legacy 迁移期专用，仅迁移工具/受控环境注入；生产部署留空 */
+  LEGACY_HMAC_SECRET?: string;
 }
 
 export type Json = Record<string, unknown>;
@@ -87,12 +95,27 @@ export async function loginUser(env: Env, request: Request): Promise<Response> {
   const username = String(body["username"] ?? "").trim();
   const password = String(body["password"] ?? "");
   const row = await env.DB.prepare(
-    "SELECT id,username,password_hash,role,status FROM users WHERE username = ?",
+    "SELECT id,username,password_hash,password_scheme,role,status FROM users WHERE username = ?",
   )
     .bind(username)
-    .first<{ id: string; username: string; password_hash: string; role: string; status: string }>();
+    .first<{
+      id: string;
+      username: string;
+      password_hash: string;
+      password_scheme: string;
+      role: string;
+      status: string;
+    }>();
   // 统一错误文案：不区分「用户不存在」与「密码错误」（防用户枚举）
-  if (!row || row.status !== "active" || !(await verifyPassword(password, row.password_hash))) {
+  const ok = row
+    ? row.status === "active" &&
+      (row.password_scheme === SCHEME
+        ? await verifyPassword(password, row.password_hash)
+        : row.password_scheme === LEGACY_SCHEME
+          ? await verifyAndUpgradeLegacy(env, row.id, password, row.password_hash)
+          : false)
+    : false;
+  if (!row || !ok) {
     return bad(401, "INVALID_CREDENTIALS", "invalid username or password");
   }
   const { token, ttlMs } = await createSession(env.DB, row.id, env);
@@ -101,6 +124,28 @@ export async function loginUser(env: Env, request: Request): Promise<Response> {
     { ok: true, user: { id: row.id, username: row.username, role: row.role } },
     { status: 200, headers: { "Set-Cookie": sessionCookie(token, ttlMs) } },
   );
+}
+
+/**
+ * stage-cloud-06：legacy-hmac-v1 验证 + 成功后立即升级 pbkdf2（计划 §17）。
+ * 无 LEGACY_HMAC_SECRET 时一律拒绝 —— 云端没有本地 SECRET 就没有 legacy 能力。
+ */
+async function verifyAndUpgradeLegacy(
+  env: Env,
+  userId: string,
+  password: string,
+  storedHash: string,
+): Promise<boolean> {
+  const secret = env.LEGACY_HMAC_SECRET;
+  if (!secret) return false;
+  if (!(await verifyLegacyHmac(password, storedHash, secret))) return false;
+  const upgraded = await hashPassword(password);
+  await env.DB.prepare(
+    "UPDATE users SET password_hash = ?, password_scheme = 'pbkdf2-sha256-v1', updated_at = ? WHERE id = ?",
+  )
+    .bind(upgraded, Date.now(), userId)
+    .run();
+  return true;
 }
 
 export async function logoutUser(env: Env, request: Request): Promise<Response> {

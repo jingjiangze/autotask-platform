@@ -11,6 +11,43 @@
 export const SCHEME = "pbkdf2-sha256-v1";
 export const DEFAULT_ITERATIONS = 50_000;
 
+/**
+ * stage-cloud-06 — legacy-hmac-v1 兼容（计划 §17/§80 / 边界校准 §1.3）
+ *
+ * 本地算法：HMAC-SHA256(SECRET, "wk" + password) 的 hex digest，SECRET 是
+ * 本地 secrets_store/secret_key.txt。云端**没有**也不应有该 SECRET ——
+ * 只有在迁移工具/受控环境显式注入 LEGACY_HMAC_SECRET 时才能验证，
+ * 且验证成功后必须立即升级为 pbkdf2-sha256-v1（计划 §17 登录升级路径）。
+ */
+export const LEGACY_SCHEME = "legacy-hmac-v1";
+export const LEGACY_SALT = "wk";
+
+export async function verifyLegacyHmac(
+  password: string,
+  storedHash: string,
+  secret: string,
+): Promise<boolean> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(LEGACY_SALT + password),
+  );
+  const hex = [...new Uint8Array(sig)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  if (hex.length !== storedHash.length) return false;
+  let diff = 0;
+  for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ storedHash.charCodeAt(i);
+  return diff === 0;
+}
+
 function b64(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let s = "";
