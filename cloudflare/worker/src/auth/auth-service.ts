@@ -33,6 +33,8 @@ export interface Env {
   COORDINATOR: DurableObjectNamespace;
   /** stage-cloud-11：凭据主密钥（base64 32B）；生产经 wrangler secret 注入 */
   CREDENTIAL_KEY?: string;
+  /** stage-cloud-14：R2 工件桶 */
+  ARTIFACTS: R2Bucket;
 }
 
 export type Json = Record<string, unknown>;

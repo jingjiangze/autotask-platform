@@ -19,6 +19,13 @@
       "migrations_dir": "migrations"
     }
   ],
+  // stage-cloud-14：R2 工件桶（stdout/日志/截图）；bucket 真实部署时创建
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "autotask-artifacts"
+    }
+  ],
   // stage-cloud-09：PathCoordinator —— 每 execution_path 一个实例（idFromName(path)）。
   // SQLite-backed DO（Free 计划可用）；LEASE_TTL_MS / RETRY_DELAY_MS 可用 vars 调。
   "durable_objects": {

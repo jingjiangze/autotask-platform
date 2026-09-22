@@ -23,6 +23,7 @@ import { getSessionUser } from "./auth/session-service";
 import { releaseCredentials, storeCredential } from "./credentials/credential-service";
 import { myOrders, orderDetail, orderByAccount } from "./orders/order-query";
 import { guestQuery } from "./orders/guest-query";
+import { downloadArtifact, uploadArtifact } from "./artifacts/artifact-service";
 
 export { ERROR_CODES, errorResponse };
 export type { ErrorCode };
@@ -59,6 +60,8 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     complete: executorComplete,
     // stage-cloud-11：凭据解封（租约门控）
     credentials: releaseCredentials,
+    // stage-cloud-14：工件上传（raw body；元数据在 query）
+    artifacts: uploadArtifact,
   };
   if (pathname.startsWith("/api/executor/v1/")) {
     const action = pathname.slice("/api/executor/v1/".length);
@@ -89,6 +92,14 @@ export async function route(request: Request, env: Env): Promise<Response | unde
   if (pathname === "/api/v1/admin/orders/by-account") {
     if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return orderByAccount(env, request);
+  }
+  // stage-cloud-14：工件下载（owner/admin，R2 流式）
+  const artifactMatch = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)\/artifacts\/([A-Za-z0-9_-]+)$/.exec(
+    pathname,
+  );
+  if (artifactMatch) {
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return downloadArtifact(env, request, artifactMatch[1]!, artifactMatch[2]!);
   }
   // stage-cloud-17：访客查单（无 proof code，仅单号前缀；校准结论）
   if (pathname === "/api/v1/guest/query") {

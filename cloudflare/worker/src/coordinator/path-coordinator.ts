@@ -348,6 +348,7 @@ export class PathCoordinator implements DurableObject {
       ok: true,
       valid: true,
       order_id: t.order_id,
+      attempt_no: t.attempt_no,
       lease_expires_at: t.lease_expires_at,
     });
   }
