@@ -12,6 +12,12 @@ import {
   registerUser,
 } from "./auth/auth-service";
 import { registerExecutor } from "./executors/executor-auth";
+import {
+  executorAck,
+  executorClaim,
+  executorComplete,
+  executorHeartbeat,
+} from "./executors/executor-api";
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
 
 export { ERROR_CODES, errorResponse };
@@ -40,6 +46,21 @@ export async function route(request: Request, env: Env): Promise<Response | unde
   if (pathname === "/api/executor/v1/register") {
     if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return registerExecutor(env, request);
+  }
+  // stage-cloud-10：Executor Pull 协议（§42/§43）
+  const executorPull: Record<string, (env: Env, req: Request) => Promise<Response>> = {
+    claim: executorClaim,
+    ack: executorAck,
+    heartbeat: executorHeartbeat,
+    complete: executorComplete,
+  };
+  if (pathname.startsWith("/api/executor/v1/")) {
+    const action = pathname.slice("/api/executor/v1/".length);
+    const handler = executorPull[action];
+    if (handler) {
+      if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+      return handler(env, request);
+    }
   }
   return undefined; // 未匹配 —— 交回 index 处理 /health 与 404
 }
