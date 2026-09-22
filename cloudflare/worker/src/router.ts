@@ -21,6 +21,7 @@ import {
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
 import { getSessionUser } from "./auth/session-service";
 import { releaseCredentials, storeCredential } from "./credentials/credential-service";
+import { myOrders, orderDetail, orderByAccount } from "./orders/order-query";
 
 export { ERROR_CODES, errorResponse };
 export type { ErrorCode };
@@ -73,6 +74,20 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     if (!session) return errorResponse(401, "AUTH_REQUIRED");
     if (session.role !== "admin") return errorResponse(403, "FORBIDDEN");
     return storeCredential(env, request);
+  }
+  // stage-cloud-16：中央查询 API（§57/§88）
+  if (pathname === "/api/v1/my/orders") {
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return myOrders(env, request);
+  }
+  const detailMatch = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)$/.exec(pathname);
+  if (detailMatch) {
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return orderDetail(env, request, detailMatch[1]!);
+  }
+  if (pathname === "/api/v1/admin/orders/by-account") {
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return orderByAccount(env, request);
   }
   return undefined; // 未匹配 —— 交回 index 处理 /health 与 404
 }
