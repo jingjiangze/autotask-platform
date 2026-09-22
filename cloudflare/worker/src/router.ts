@@ -22,6 +22,7 @@ import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
 import { getSessionUser } from "./auth/session-service";
 import { releaseCredentials, storeCredential } from "./credentials/credential-service";
 import { myOrders, orderDetail, orderByAccount } from "./orders/order-query";
+import { guestQuery } from "./orders/guest-query";
 
 export { ERROR_CODES, errorResponse };
 export type { ErrorCode };
@@ -88,6 +89,11 @@ export async function route(request: Request, env: Env): Promise<Response | unde
   if (pathname === "/api/v1/admin/orders/by-account") {
     if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return orderByAccount(env, request);
+  }
+  // stage-cloud-17：访客查单（无 proof code，仅单号前缀；校准结论）
+  if (pathname === "/api/v1/guest/query") {
+    if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return guestQuery(env, request);
   }
   return undefined; // 未匹配 —— 交回 index 处理 /health 与 404
 }
