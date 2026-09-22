@@ -1,0 +1,10 @@
+// stage-cloud-03 bootstrap：Cloudflare 中央控制面骨架
+// 本阶段仅实现 GET /health（计划 §77）；D1/R2/DO 绑定在后续 stage 逐个加入。
+{
+  "name": "autotask-central",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": {
+    "enabled": true
+  }
+}
