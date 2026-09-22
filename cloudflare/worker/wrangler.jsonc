@@ -19,14 +19,13 @@
       "migrations_dir": "migrations"
     }
   ],
-  // stage-cloud-14：R2 工件桶 —— 待账户开通 R2 后取消注释并重新 deploy
-  // （当前账户 R2 未激活，Cloudflare 返回 10042；工件端点在绑定缺失时不可用）
-  // "r2_buckets": [
-  //   {
-  //     "binding": "ARTIFACTS",
-  //     "bucket_name": "autotask-artifacts"
-  //   }
-  // ],
+  // stage-cloud-14：R2 工件桶 —— R2 已于 2026-09-22 开通，恢复绑定
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "autotask-artifacts"
+    }
+  ],
   // stage-cloud-09：PathCoordinator —— 每 execution_path 一个实例（idFromName(path)）。
   // SQLite-backed DO（Free 计划可用）；LEASE_TTL_MS / RETRY_DELAY_MS 可用 vars 调。
   "durable_objects": {
