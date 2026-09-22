@@ -124,6 +124,32 @@ export async function registerExecutor(env: Env, request: Request): Promise<Resp
   );
 }
 
+/**
+ * stage-cloud-13 — 节点级心跳（§45）：POST /api/executor/v1/node-heartbeat
+ * 刷新 last_seen_at；返回租约过期提示（Executor 据此恢复）。
+ */
+export async function executorNodeHeartbeat(env: Env, request: Request): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return bad(400, "VALIDATION_FAILED");
+  }
+  const executorId = String(body["executor_id"] ?? "");
+  const executionPath = String(body["execution_path"] ?? "");
+  if (!executorId || !executionPath) return bad(400, "VALIDATION_FAILED");
+  const auth = await authenticateExecutor(env, request, {
+    executor_id: executorId,
+    execution_path: executionPath,
+  });
+  if ("code" in auth) return bad(auth.status, auth.code);
+  return Response.json({
+    ok: true,
+    server_time: Date.now(),
+    lease_ttl_ms: 10 * 60 * 1000,
+  });
+}
+
 export interface AuthenticatedExecutor {
   row: ExecutorNodeRow;
 }
@@ -155,6 +181,16 @@ export async function authenticateExecutor(
   // §40：路径伪造拒绝 —— token 正确但 path 不匹配同样 DENY
   if (row.execution_path !== expected.execution_path) {
     return { status: 403, code: "EXECUTOR_PATH_MISMATCH" };
+  }
+  // stage-cloud-13：每次认证成功即视为节点存活信号（best-effort，不阻塞主流程）
+  try {
+    await env.DB.prepare(
+      "UPDATE executor_nodes SET last_seen_at = ?, status = 'online' WHERE id = ?",
+    )
+      .bind(Date.now(), row.id)
+      .run();
+  } catch {
+    /* 心跳回写失败不影响本次请求 */
   }
   return { row };
 }

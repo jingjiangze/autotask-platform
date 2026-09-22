@@ -11,7 +11,7 @@ import {
   logoutUser,
   registerUser,
 } from "./auth/auth-service";
-import { registerExecutor } from "./executors/executor-auth";
+import { registerExecutor, executorNodeHeartbeat } from "./executors/executor-auth";
 import {
   executorAck,
   executorClaim,
@@ -62,6 +62,8 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     credentials: releaseCredentials,
     // stage-cloud-14：工件上传（raw body；元数据在 query）
     artifacts: uploadArtifact,
+    // stage-cloud-13：节点级心跳
+    "node-heartbeat": executorNodeHeartbeat,
   };
   if (pathname.startsWith("/api/executor/v1/")) {
     const action = pathname.slice("/api/executor/v1/".length);
