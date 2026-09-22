@@ -4,7 +4,19 @@
   "name": "autotask-central",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
+  // 测试与后续 migration 读取需要 node 兼容模块（vitest-plugin known-issues）
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
-  }
+  },
+  // stage-cloud-04：D1 = 唯一业务数据源（计划 §6）。
+  // database_id 为本地占位；真实部署（wrangler d1 create）后替换。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "autotask-central",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
 }
