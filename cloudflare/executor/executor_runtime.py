@@ -50,7 +50,8 @@ class CentralClient:
         if query:
             from urllib.parse import urlencode
             url += "?" + urlencode(query)
-        headers = {"Content-Type": content_type or "application/json"}
+        headers = {"Content-Type": content_type or "application/json",
+                   "User-Agent": "autotask-executor/1.0"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         body = raw if raw is not None else json.dumps(payload or {}).encode()
