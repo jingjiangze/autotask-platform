@@ -1,0 +1,72 @@
+# Commit 04 — Cloud Test 网络隔离真机验收
+#
+# GitHub 托管 ubuntu Runner = 带真实 Linux 内核 + root 的云环境，
+# 可执行 privileged nftables；这是当前无需额外凭据即可完成的
+# 「真实内核级 egress guard」验收通道（Codespace 内是否放行
+# CAP_NET_ADMIN 待拿到 lifecycle token 后另行实测）。
+#
+# 语义：本 job 失败 = fail-closed 边界未成立 = 必须停止后续 Cloud Runner 开发
+# （方案 §二十六 停止条件 1/5）。
+name: cloud-test-guard
+
+on:
+  push:
+    branches:
+      - feature/cloud-test-orchestration-baseline
+    paths:
+      - "cloud_test_guard.py"
+      - "sitecustomize.py"
+      - "tools/install_cloud_test_egress_guard.sh"
+      - "tools/verify_cloud_test_egress.sh"
+      - "tests/test_cloud_test_guard.py"
+      - ".github/workflows/cloud-test-guard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  egress-guard:
+    name: kernel egress guard (real Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure nftables + pytest
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables
+          nft --version
+          python3 -m pip install -q --break-system-packages pytest \
+            || python3 -m pip install -q pytest
+
+      - name: Dump environment
+        run: |
+          id
+          uname -a
+          which nft
+
+      - name: Run Commit 04 acceptance (fail-closed egress)
+        run: |
+          sudo bash tools/verify_cloud_test_egress.sh
+
+      - name: Fix report permissions
+        if: always()
+        run: |
+          sudo chmod -R a+rwX cloud-test-data 2>/dev/null || true
+          ls -la cloud-test-data 2>/dev/null || true
+
+      - name: Show acceptance report
+        if: always()
+        run: |
+          cat cloud-test-data/acceptance-report.txt 2>/dev/null || echo "(no report produced)"
+
+      - name: Upload acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-test-egress-report
+          path: cloud-test-data/
+          if-no-files-found: warn
