@@ -1,36 +1,10 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
-import { beforeEach, describe, expect, inject, it } from "vitest";
-import type { D1Database } from "@cloudflare/workers-types";
-import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { DB, TABLES, applyMigrations } from "./helpers";
 
 // stage-cloud-04 验收（计划 §78）：
 //   clean install / 重放幂等 / FK 有效 / 重复键拒绝 / EXPLAIN QUERY PLAN 无全表扫描
 // 迁移由 tests/global-setup.ts 在 Node 侧读取，经 provided context 注入。
-
-const DB = (env as unknown as { DB: D1Database }).DB;
-const MIGRATIONS = inject("d1Migrations");
-
-const TABLES = [
-  "users",
-  "auth_sessions",
-  "products",
-  "orders",
-  "order_credentials",
-  "tasks",
-  "task_attempts",
-  "executor_nodes",
-  "artifacts",
-  "audit_events",
-  "idempotency_keys",
-];
-
-/** 幂等应用全部迁移（IF NOT EXISTS 语句，可安全重放）。
- *  放在 beforeEach：无论插件按文件还是按用例隔离存储都能自愈。 */
-async function applyMigrations(): Promise<void> {
-  expect(MIGRATIONS.length).toBeGreaterThanOrEqual(2);
-  const stmts = MIGRATIONS.flatMap((m) => m.queries.map((q) => DB.prepare(q)));
-  await DB.batch(stmts);
-}
 
 async function tableNames(): Promise<Set<string>> {
   const res = await DB.prepare(

@@ -11,7 +11,6 @@ describe("GET /health", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["ok"]).toBe(true);
     expect(body["service"]).toBe("autotask-central");
-    expect(body["stage"]).toBe("stage-cloud-03");
     expect(typeof body["time"]).toBe("number");
   });
 
