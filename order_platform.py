@@ -21,6 +21,11 @@ import time
 import uuid
 from datetime import datetime
 
+CLOUD_TEST_MODE = os.environ.get("CLOUD_TEST_MODE", "0") == "1"
+if CLOUD_TEST_MODE:
+    from cloud_test_guard import require_ready as _require_cloud_test_egress
+    _require_cloud_test_egress()
+
 import requests
 from flask import Flask, request, redirect, jsonify, Response, make_response
 
@@ -606,6 +611,11 @@ def build_order_env(oid, o):
     env["WK_CHUA"] = chua
     env["WK_LANG"] = lang
     env["TZ"] = "Asia/Shanghai"
+    if CLOUD_TEST_MODE:
+        env["CLOUD_TEST_MODE"] = "1"
+        env["CLOUD_TEST_EGRESS_REQUIRED"] = "1"
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(x for x in (APP_DIR, existing_pp) if x)
     proxy = pick_proxy()
     if proxy:
         for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
