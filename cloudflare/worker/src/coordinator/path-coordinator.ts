@@ -33,6 +33,7 @@ interface QueueTask {
   trace_id: string;
   status: TaskStatus;
   attempt_no: number;
+  max_attempts: number;
   lease_id: string | null;
   lease_expires_at: number | null;
   executor_id: string | null;
@@ -50,6 +51,7 @@ type CoordMessage =
       required_capabilities: string[];
       payload: Record<string, unknown>;
       trace_id?: string;
+      max_attempts?: number;
     }
   | {
       type: "claim";
@@ -168,6 +170,10 @@ export class PathCoordinator implements DurableObject {
       trace_id: msg.trace_id ?? crypto.randomUUID(),
       status: "queued",
       attempt_no: existing ? existing.attempt_no : 0,
+      max_attempts:
+        typeof msg.max_attempts === "number" && msg.max_attempts >= 1
+          ? msg.max_attempts
+          : (existing?.max_attempts ?? 2), // §52：默认预算 2 次尝试
       lease_id: null,
       lease_expires_at: null,
       executor_id: null,
@@ -254,13 +260,31 @@ export class PathCoordinator implements DurableObject {
   ): Promise<Response> {
     const t = await this.getTask(msg.task_id);
     if (!t || t.lease_id !== msg.lease_id) {
+      // 幂等（§15/§53）：Executor 网络重试导致的重复 complete，若任务已达
+      // 终态则返回当前状态而非报错，保证 at-least-once 语义下结果不重复计。
+      if (t && ["succeeded", "failed", "canceled"].includes(t.status)) {
+        return Response.json({ ok: true, status: t.status, idempotent: true });
+      }
       return fail("LEASE_INVALID", "unknown task or lease mismatch");
     }
     const tr = transitionTask(t.status, msg.outcome);
     if (!tr.ok) return fail("INVALID_TRANSITION", tr.reason ?? "");
     t.status = msg.outcome;
     if (msg.outcome === "retry_wait") {
-      // 计划 §46/§52：延迟后回队；重试计数已随 claim 递增
+      // 计划 §52：重试预算 —— attempt_no 已随 claim 递增，超预算直接 failed
+      if (t.attempt_no >= t.max_attempts) {
+        t.status = "failed";
+        t.lease_id = null;
+        t.lease_expires_at = null;
+        t.retry_at = null;
+        await this.putTask(t);
+        return Response.json({
+          ok: true,
+          status: "failed",
+          reason: "RETRY_BUDGET_EXHAUSTED",
+          attempt_no: t.attempt_no,
+        });
+      }
       t.retry_at = Date.now() + this.retryDelay();
       await this.putTask(t);
       await this.scheduleAlarm(t.retry_at);
