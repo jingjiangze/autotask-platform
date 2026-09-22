@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import { applyMigrations } from "./helpers";
+import { PathCoordinator } from "../src/coordinator/path-coordinator";
 
 // stage-cloud-15 验收（计划 §15/§44/§52/§53）：
 // 重试预算（max_attempts 耗尽 → failed 不再回队）/
@@ -76,7 +77,7 @@ describe("stage-cloud-15 retry budget / idempotency / fencing", () => {
     expect(w1.body["status"]).toBe("retry_wait");
 
     // alarm 立即回队（拨 retry_at 到过去）
-    await runInDurableObject(stub, async (i, state) => {
+    await runInDurableObject(stub, async (i: PathCoordinator, state: DurableObjectState) => {
       const t = (await state.storage.get<Record<string, unknown>>("task:t-budget"))!;
       t["retry_at"] = Date.now() - 1000;
       await state.storage.put("task:t-budget", t);
@@ -107,13 +108,14 @@ describe("stage-cloud-15 retry budget / idempotency / fencing", () => {
     const stub = coord("internal");
     await enqueue(stub, "t-default");
     const d1 = await claim(stub);
+    await msg(stub, { type: "ack", task_id: "t-default", lease_id: d1["lease_id"] });
     await msg(stub, {
       type: "complete",
       task_id: "t-default",
       lease_id: d1["lease_id"],
       outcome: "retry_wait",
     });
-    await runInDurableObject(stub, async (i, state) => {
+    await runInDurableObject(stub, async (i: PathCoordinator, state: DurableObjectState) => {
       const t = (await state.storage.get<Record<string, unknown>>("task:t-default"))!;
       t["retry_at"] = Date.now() - 1000;
       await state.storage.put("task:t-default", t);
@@ -163,7 +165,7 @@ describe("stage-cloud-15 retry budget / idempotency / fencing", () => {
     const oldLease = d1["lease_id"] as string;
 
     // 模拟原租约过期被回收并重新签发
-    await runInDurableObject(stub, async (i, state) => {
+    await runInDurableObject(stub, async (i: PathCoordinator, state: DurableObjectState) => {
       const t = (await state.storage.get<Record<string, unknown>>("task:t-fence"))!;
       t["lease_expires_at"] = Date.now() - 1000;
       await state.storage.put("task:t-fence", t);
