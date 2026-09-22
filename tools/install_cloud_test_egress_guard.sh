@@ -16,6 +16,8 @@ command -v nft >/dev/null 2>&1 || {
 
 HOSTS=(
   "zhihuishu.com"
+  "hike.zhihuishu.com"
+  "passport.zhihuishu.com"
   "chaoxing.com"
   "api.openai.com"
 )

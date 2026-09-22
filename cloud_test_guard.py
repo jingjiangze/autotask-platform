@@ -139,7 +139,7 @@ def kernel_guard_active():
         return False
     try:
         p = subprocess.run(
-            ["nft", "list", "table", "inet", NFT_TABLE],
+            ["nft", "-j", "list", "table", "inet", NFT_TABLE],
             capture_output=True,
             text=True,
             timeout=3,
@@ -149,8 +149,28 @@ def kernel_guard_active():
         return False
     if p.returncode != 0:
         return False
-    out = p.stdout.lower()
-    return "blocked_ipv4" in out and "blocked_ipv6" in out and "reject" in out
+    try:
+        data = json.loads(p.stdout)
+    except (TypeError, ValueError):
+        return False
+
+    sets = {}
+    rules = []
+    for obj in data.get("nftables", []):
+        if "set" in obj:
+            s = obj["set"]
+            sets[s.get("name")] = s
+        if "rule" in obj:
+            rules.append(obj["rule"])
+
+    v4 = sets.get("blocked_ipv4", {})
+    v6 = sets.get("blocked_ipv6", {})
+    elems = (v4.get("elem") or []) + (v6.get("elem") or [])
+    has_reject = any(
+        "reject" in json.dumps(rule, ensure_ascii=False).lower()
+        for rule in rules
+    )
+    return bool(elems) and has_reject
 
 
 def require_ready():
