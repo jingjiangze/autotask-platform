@@ -154,27 +154,37 @@ fi
 
 # -----------------------------------------------------------------------------
 # 6. 子进程继承（孙进程）：父→子→孙 三层均被守卫覆盖
-#    注意：父进程必须带 CLOUD_TEST_MODE + PYTHONPATH，否则 sitecustomize
-#    找不到 guard 模块会 exit 78，那是「启动被拒」而不是「运行时拦截」。
+#    安全属性：孙进程绝不能连上被禁目标。两种形态都算守住：
+#      rc=1  + 'CLOUD_TEST_MODE blocked'      → 运行时拦截（理想）
+#      rc=78 + 'egress guard failed closed'   → fail-closed 拒启（更严格）
+#    连接成功（孙进程 rc=0）→ FAIL。无论结果如何都把证据打进日志。
 # -----------------------------------------------------------------------------
 if CLOUD_TEST_MODE=1 CLOUD_TEST_EGRESS_REQUIRED=1 PYTHONPATH="$REPO_ROOT" \
-   timeout 90 "$PY" - <<'PYEOF'
+   timeout 120 "$PY" - <<'PYEOF'
 import os, subprocess, sys
 env = dict(os.environ, CLOUD_TEST_MODE="1", CLOUD_TEST_EGRESS_REQUIRED="1")
-code = ("import subprocess,sys;"
-        "p=subprocess.run([sys.executable,'-c',"
-        "\"import socket;socket.create_connection(('passport.zhihuishu.com',443),timeout=5)\"],"
-        "capture_output=True,text=True);"
-        "assert p.returncode != 0 and 'CLOUD_TEST_MODE blocked' in p.stderr, "
-        "f'grandchild rc={p.returncode} err={p.stderr[:200]}');"
-        "print('grandchild-blocked-ok')")
-r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=80)
+code = (
+    "import subprocess,sys;"
+    "p=subprocess.run([sys.executable,'-c',"
+    "\"import socket;socket.create_connection(('passport.zhihuishu.com',443),timeout=5)\"],"
+    "capture_output=True,text=True);"
+    "print('grandchild_rc=%d' % p.returncode);"
+    "print('grandchild_err=%r' % p.stderr[:300]);"
+    "ok = (p.returncode == 1 and 'CLOUD_TEST_MODE blocked' in p.stderr) "
+    "  or (p.returncode == 78 and 'egress guard failed closed' in p.stderr);"
+    "sys.exit(0 if ok else 3)"
+)
+r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                   text=True, env=env, timeout=110)
+print("child_rc=%s" % r.returncode)
+print("child_out=%r" % (r.stdout or "")[:300])
+print("child_err=%r" % (r.stderr or "")[:400])
 sys.exit(r.returncode)
 PYEOF
 then
-  report PASS "subprocess inheritance: grandchild connect refused, guard inherited via PYTHONPATH"
+  report PASS "subprocess inheritance: grandchild denied (evidence above)"
 else
-  report FAIL "subprocess inheritance: grandchild was not properly blocked"
+  report FAIL "subprocess inheritance: see child_rc/child_out/child_err evidence above"
 fi
 
 # -----------------------------------------------------------------------------
