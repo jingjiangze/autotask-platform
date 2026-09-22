@@ -22,6 +22,7 @@ export const ERROR_CODES = {
   FORBIDDEN: "Insufficient permissions",
   LEASE_INVALID: "Unknown task or invalid lease",
   CREDENTIAL_DECRYPT_FAILED: "Credential decryption failed",
+  CLOUDFLARE_ERROR: "Internal orchestration error",
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_CODES;

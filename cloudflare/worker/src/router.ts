@@ -23,6 +23,13 @@ import { getSessionUser } from "./auth/session-service";
 import { releaseCredentials, storeCredential } from "./credentials/credential-service";
 import { myOrders, orderDetail, orderByAccount } from "./orders/order-query";
 import { guestQuery } from "./orders/guest-query";
+import {
+  cancelTask,
+  createOrder,
+  createOrderTask,
+  listProducts,
+  taskDetail,
+} from "./orders/order-service";
 import { downloadArtifact, uploadArtifact } from "./artifacts/artifact-service";
 
 export { ERROR_CODES, errorResponse };
@@ -94,6 +101,27 @@ export async function route(request: Request, env: Env): Promise<Response | unde
   if (pathname === "/api/v1/admin/orders/by-account") {
     if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return orderByAccount(env, request);
+  }
+  // stage-cloud-16b：订单/任务创建（§55，E2E 前置）
+  if (pathname === "/api/v1/products") {
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return listProducts(env, request);
+  }
+  if (pathname === "/api/v1/orders") {
+    if (request.method === "GET") return myOrders(env, request);
+    if (request.method === "POST") return createOrder(env, request);
+    return errorResponse(405, "METHOD_NOT_ALLOWED");
+  }
+  if (pathname.startsWith("/api/v1/orders/") && pathname.endsWith("/tasks")) {
+    const oid = pathname.slice("/api/v1/orders/".length, -"/tasks".length);
+    if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return createOrderTask(env, request, oid);
+  }
+  const taskMatch = /^\/api\/v1\/tasks\/([A-Za-z0-9_-]+)$/.exec(pathname);
+  if (taskMatch) {
+    if (request.method === "GET") return taskDetail(env, request, taskMatch[1]!);
+    if (request.method === "POST") return cancelTask(env, request, taskMatch[1]!);
+    return errorResponse(405, "METHOD_NOT_ALLOWED");
   }
   // stage-cloud-14：工件下载（owner/admin，R2 流式）
   const artifactMatch = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)\/artifacts\/([A-Za-z0-9_-]+)$/.exec(
