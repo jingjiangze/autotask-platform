@@ -144,3 +144,4 @@ cloudflare/**/.env.*
 *.secret
 *.credentials
 *.credentials.json
+cloudflare/deploy-secrets.txt

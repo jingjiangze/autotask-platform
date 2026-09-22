@@ -15,17 +15,18 @@
     {
       "binding": "DB",
       "database_name": "autotask-central",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b5686aeb-e384-4888-ae00-dab996cc4a4b",
       "migrations_dir": "migrations"
     }
   ],
-  // stage-cloud-14：R2 工件桶（stdout/日志/截图）；bucket 真实部署时创建
-  "r2_buckets": [
-    {
-      "binding": "ARTIFACTS",
-      "bucket_name": "autotask-artifacts"
-    }
-  ],
+  // stage-cloud-14：R2 工件桶 —— 待账户开通 R2 后取消注释并重新 deploy
+  // （当前账户 R2 未激活，Cloudflare 返回 10042；工件端点在绑定缺失时不可用）
+  // "r2_buckets": [
+  //   {
+  //     "binding": "ARTIFACTS",
+  //     "bucket_name": "autotask-artifacts"
+  //   }
+  // ],
   // stage-cloud-09：PathCoordinator —— 每 execution_path 一个实例（idFromName(path)）。
   // SQLite-backed DO（Free 计划可用）；LEASE_TTL_MS / RETRY_DELAY_MS 可用 vars 调。
   "durable_objects": {
