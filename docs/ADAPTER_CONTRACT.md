@@ -102,7 +102,7 @@
 | `register` | `(reg_code: str, username: str, password: str) -> SessionUser` | 口令错 → `ValidationError`；重名 → `ValidationError` |
 | `login` | `(username: str, password: str) -> SessionUser` | 失败 → `AuthError` |
 | `session_user` | `(session_token: str) -> SessionUser \| None` | 无会话返回 `None`（不抛错，本地 `current_user()` 同语义 `:213`） |
-| `logout` | `(session_token: str) -> None` | 幂等 |
+| `logout` | `(session_token: str) -> None` | 幂等；返回 None。**注意**：本地实现的退出是"删 cookie"，token 仍可验签；真正失效 token 仅是云端能力（见 §8.2 差异表） |
 | `hash_password` | `(password: str) -> str` | 本地为 `hmac(secret, salt+pw)` `:205`；云端独立实现，**两套哈希不互认** |
 
 ### 5.3 `CourseAdapter`（`course.py`）— 覆盖 F07（`TEST ADAPTER`）
@@ -166,3 +166,49 @@
 - 本契约**不含** Runner / Scheduler / Approval / Codespaces / Cloudflare 接口——它们分别在 Commit 17/18/22/23/20 定义（v3 §61 顺序）。
 - `Health`（`HealthProbe`）与 `Admin`（统计聚合）**不是适配器**：它们是服务层，读 `StorageAdapter` + Runner 状态，接口在 Commit 19/20 定义。
 - 本文件与 `LOCAL_FUNCTIONAL_PARITY.md` 是后续所有 Commit 的**引用基准**；两者如有冲突，以功能基线 F 表为准并立即修正本文件。
+
+---
+
+## 8. 实现状态（Commit 07，2026-09-22）
+
+状态词表：`BASELINE` / `TARGET` / `IMPLEMENTED` / `PARTIAL` / `PENDING` / `BLOCKED` / `PASS`（`PASS` 仅用于端到端验收）。
+
+| 契约 | Local | Synthetic | Replay | 测试 |
+|---|---|---|---|---|
+| `AuthAdapter` | IMPLEMENTED | IMPLEMENTED | PENDING | PASS（契约/兼容/安全） |
+| `CourseAdapter` | IMPLEMENTED | IMPLEMENTED | PENDING | PASS |
+| `QrAdapter` | PARTIAL（`create_session` 需注入 hook） | IMPLEMENTED | PENDING | PASS |
+| `ExecutionAdapter` | IMPLEMENTED | IMPLEMENTED | PENDING | PASS |
+| `StorageAdapter` + `LogSink` | IMPLEMENTED | IMPLEMENTED | PENDING | PASS |
+| `AdapterSurface` / `assert_synthetic` | IMPLEMENTED | IMPLEMENTED | — | PASS |
+| `factory.py` | IMPLEMENTED | IMPLEMENTED（自动校验） | — | PASS |
+
+实现位置：
+
+```text
+cloud_test/adapters/local/       # 薄包装现有平台（backend 懒加载；CLOUD_TEST_MODE 下硬拒绝）
+cloud_test/adapters/synthetic/   # 内存态合成实现（无网络/无子进程/无真实文件）
+cloud_test/adapters/factory.py   # build_local_adapters / build_synthetic_adapters
+tests/cloud_test/adapter_cases.py          # 统一 case（两侧同断言）
+tests/cloud_test/test_adapter_contract.py  # 契约
+tests/cloud_test/test_adapter_compatibility.py  # 形状/语义一致性
+tests/cloud_test/test_adapter_security.py  # 禁网/禁真实路径/来源校验
+tests/cloud_test/fake_backend.py           # 内存 sqlite 假后端（镜像真实 SQL 路径）
+tests/cloud_test/conftest.py               # 断言 order_platform 永不被导入
+```
+
+### 8.1 契约补充（Commit 07 新增，不改动 Commit 06 已冻结项）
+
+- `ExecutionTask`（frozen DTO）：`task_id, attempt, runner_id, work_ref, log_ref`。Commit 06 的 `ExecutionContext` 仍是**活接口**（Protocol）；新 DTO 是只读上下文记录，命名不同以避免同一词汇表出现两个 `ExecutionContext`。二者都不得包含 password/cookie。
+- `SyntheticExecutionAdapter(exit_code_map=...)`：允许按 `order.account` 覆盖退出码，用于让同一套契约 case 驱动两侧。属于合成实现的参数，不是契约。
+- `SyntheticExecutionContext`/`LocalExecutionContext`：实现 `ExecutionContext` Protocol 的具体类（`order_id, attempt, heartbeat(), log(), progress()`），额外暴露 `events/heartbeats/progress_state` 供测试观测。
+
+### 8.2 有意差异（必须保留可见）
+
+| 差异 | Local | Cloud (Synthetic) | 处理 |
+|---|---|---|---|
+| `logout` 效果 | 只删 cookie，token 仍可验签（`:1792`） | 真正失效 token | 契约只要求幂等 + 返回 None；token 失效属云端属性，见 parity §8 |
+| QR 会话创建 | 内联在路由（含真实网络），需 `create_hook` 接线 | 完整实现（合成 PNG，本地生成） | Local `create_session` 未接线时抛 `AdapterContractError`，暴露原因而非静默 |
+| 设置项白名单 | 允许 `proxy_pool/spoof/jitter` | 拒绝三者（F19，UI 显示 Not available） | 由 `LOCAL_ONLY_SETTINGS` / `CLOUD_SETTINGS` 强制 |
+| `progress()` | 内存态（平台无 progress 列） | 每步回调 | 契约只要求"能上报"，持久化归 Runner |
+| 密码哈希 | hmac(secret, salt+pw) | sha256(synthetic-salt:…) | 两套哈希**不互认**；不得跨环境复用口令材料 |

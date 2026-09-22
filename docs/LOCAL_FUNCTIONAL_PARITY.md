@@ -260,36 +260,48 @@
 
 ## 4. 汇总矩阵
 
-| ID | 功能 | Local | Cloud Test | CI |
+状态词表（统一使用，禁止用 PASS 表示"计划中"）：
+
+| 词 | 含义 |
+|---|---|
+| `BASELINE` | 已在本文档冻结的事实基线 |
+| `TARGET` | 有明确设计，未开始实现 |
+| `IMPLEMENTED` | 代码已实现（adapter 层）；**不等于端到端跑通** |
+| `PARTIAL` | 部分实现，缺口见备注 |
+| `PENDING` | 依赖后续 Commit（API/前端/Runner/Scheduler 等） |
+| `BLOCKED` | 被外部条件阻塞 |
+| `PASS` | **端到端验收通过**（本文档 Cloud Test 列暂不出现） |
+
+| ID | 功能 | Local | Cloud Test（Commit 07 后） | CI |
 |---|---|---|---|---|
-| F01 | 首页 | PASS | PASS | PASS |
-| F02 | 注册 | PASS | PASS | PASS |
-| F03 | 登录 | PASS | PASS | PASS |
-| F04 | 退出 | PASS | PASS | PASS |
-| F05 | 商品列表 | PASS | PASS | PASS |
-| F06 | 单个下单 | PASS | PASS | PASS |
-| F07 | 普通账号查询课程 | PASS | **TEST ADAPTER** | PASS |
-| F08 | 扫码二维码 | PASS | **TEST ADAPTER** | PASS |
-| F09 | 扫码状态轮询 | PASS | **TEST ADAPTER** | PASS |
-| F10 | 课程选择 | PASS | PASS | PASS |
-| F11 | 提交订单 | PASS | PASS | PASS |
-| F12 | 订单详情 | PASS | PASS | PASS |
-| F13 | 我的订单 | PASS | PASS | PASS |
-| F14 | 订单查询 | PASS | PASS | PASS |
-| F15 | 批量下单 | PASS | PASS | PASS |
-| F16 | 订单日志 | PASS | PASS | PASS |
-| F17 | 风险标记 | PASS | **TEST ADAPTER** | PASS |
-| F18 | 管理后台 | PASS | PASS | PASS |
-| F19 | 管理设置 | PASS | PASS（白名单，本地专属项 NOT AVAILABLE） | PASS |
-| F20 | 并发控制 | PASS | PASS | PASS |
-| F21 | 健康检查 | PASS | PASS | PASS |
-| F22 | 任务执行 | PASS | **TEST ADAPTER** | PASS |
-| F23 | heartbeat | PASS | PASS | PASS |
-| F24 | watchdog | PASS | PASS | PASS |
-| F25 | retry | PASS | PASS | PASS |
-| F26 | 自动恢复 | PASS | PASS | PASS |
-| F27 | 备份 | PASS | PASS | PASS |
-| F28 | 资源监控 | PASS | PASS（跨平台子集） | PASS |
+| F01 | 首页 | PASS | PENDING（前端未建） | PASS |
+| F02 | 注册 | PASS | IMPLEMENTED（SyntheticAuthAdapter） | PASS |
+| F03 | 登录 | PASS | IMPLEMENTED（SyntheticAuthAdapter） | PASS |
+| F04 | 退出 | PASS | IMPLEMENTED（语义差异已登记，见 §8） | PASS |
+| F05 | 商品列表 | PASS | IMPLEMENTED（SyntheticStorageAdapter） | PASS |
+| F06 | 单个下单 | PASS | IMPLEMENTED（SyntheticStorageAdapter） | PASS |
+| F07 | 普通账号查询课程 | PASS | IMPLEMENTED（SyntheticCourseAdapter，`TEST ADAPTER`） | PASS |
+| F08 | 扫码二维码 | PASS | PARTIAL（Synthetic 侧 IMPLEMENTED；Local 侧 create 仍内联在路由） | PASS |
+| F09 | 扫码状态轮询 | PASS | IMPLEMENTED（SyntheticQrAdapter，`TEST ADAPTER`） | PASS |
+| F10 | 课程选择 | PASS | IMPLEMENTED（SyntheticStorageAdapter.submit_order） | PASS |
+| F11 | 提交订单 | PASS | IMPLEMENTED（SyntheticStorageAdapter） | PASS |
+| F12 | 订单详情 | PASS | PARTIAL（数据 IMPLEMENTED；页面 PENDING） | PASS |
+| F13 | 我的订单 | PASS | IMPLEMENTED（list_orders） | PASS |
+| F14 | 订单查询 | PASS | IMPLEMENTED（find_order_by_prefix） | PASS |
+| F15 | 批量下单 | PASS | IMPLEMENTED（storage 层；批量编排 PENDING） | PASS |
+| F16 | 订单日志 | PASS | IMPLEMENTED（SyntheticLogSink） | PASS |
+| F17 | 风险标记 | PASS | IMPLEMENTED（SyntheticExecutionAdapter.scan_risk，`TEST ADAPTER`） | PASS |
+| F18 | 管理后台 | PASS | PENDING（统计服务/前端未建） | PASS |
+| F19 | 管理设置 | PASS | PARTIAL（白名单已强制；页面 PENDING） | PASS |
+| F20 | 并发控制 | PASS | PENDING（Scheduler，Commit 18） | PASS |
+| F21 | 健康检查 | PASS | PENDING（Control Plane，Commit 19/20） | PASS |
+| F22 | 任务执行 | PASS | IMPLEMENTED（SyntheticExecutionAdapter，`TEST ADAPTER`） | PASS |
+| F23 | heartbeat | PASS | PARTIAL（adapter 回调已有；TaskLease 待 Commit 16） | PASS |
+| F24 | watchdog | PASS | PENDING（lease 回收，Commit 16） | PASS |
+| F25 | retry | PASS | PARTIAL（错误分类已供重试判定；调度重试待 Commit 18） | PASS |
+| F26 | 自动恢复 | PASS | PENDING（控制面 reconcile） | PASS |
+| F27 | 备份 | PASS | PENDING（Durable Object 快照） | PASS |
+| F28 | 资源监控 | PASS | PENDING（跨平台指标服务） | PASS |
 
 `TEST ADAPTER` = 能力保留、执行层替换为 Synthetic/Replay；**不等于不支持**。
 
@@ -331,3 +343,34 @@
 2. 任何新增云端接口都必须能在上表 F01–F28 中找到对应行，否则视为范围蔓延。
 3. 本文件中标注 `TEST ADAPTER` 的 5 项（F07/F08/F09/F17/F22）必须在 Commit 07 的契约测试中**与 Local 实现跑同一套断言**，以证明接口等价。
 4. 若后续实测发现 F 列表与真实代码不符，必须**先修正本基线再改代码**（基线是契约，不是注释）。
+
+---
+
+## 8. Commit 07 实现状态（adapter 层，2026-09-22）
+
+`docs/ADAPTER_CONTRACT.md` 的契约已落地为可运行实现：
+
+```text
+cloud_test/adapters/
+    base.py auth.py course.py qr.py execution.py storage.py   # 契约（IO-free，CI 断言保证）
+    factory.py                                                # build_local_adapters / build_synthetic_adapters
+    local/      backend.py errors.py auth.py course.py qr.py execution.py storage.py
+    synthetic/  auth.py course.py qr.py execution.py storage.py
+```
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| Local adapters（5） | IMPLEMENTED | 薄包装现有平台能力；`is_synthetic=False` |
+| Synthetic adapters（5） | IMPLEMENTED | 内存态、无网络、无子进程、无真实文件；`is_synthetic=True` |
+| Adapter factory | IMPLEMENTED | 合成侧逐个 `assert_synthetic`；本地侧拒绝出现合成适配器 |
+| Contract tests | PASS（254 用例） | 同一套 case 跑 Local/Synthetic 两侧 |
+| Compatibility tests | PASS | DTO 形状/类型/状态词表一致；差异项单列 |
+| Security tests | PASS | 禁网、禁真实路径、禁 import `order_platform`（conftest 强制） |
+| Replay adapters | PENDING | 未实现（非本 Commit 硬要求），留待后续 |
+
+**已登记的两处有意差异（不是缺陷，是事实）**：
+
+1. **logout 语义**：Synthetic 会真正失效 token；Local 的退出只是删 cookie（`order_platform.py:1792`），token 仍然可验签。契约因此只要求「登出是幂等的、返回 None」；token 失效仅是云端属性。
+2. **Local QR `create_session`**：创建会话的代码内联在 Flask 路由 `api_qr_start` 里（含真实网络调用），提取它必须改 `order_platform.py`——本 Commit 明确禁止。因此 Local 侧必须注入 `create_hook`（生产接线），未接线时抛 `AdapterContractError` 并指明原因；Synthetic 侧完整实现。**这不是把缺口写成 PASS。**
+
+**新增的硬防线**：`tests/cloud_test/conftest.py` 在每个用例前后断言 `order_platform` 未被导入。原因：该模块 `import` 即产生副作用（`order_platform.py:918-927` 写真实库 + 起 4 个常驻线程）。本 Commit 开发过程中曾触发一次误导入（见 §6 G2 相关），已修复并加装该断言——生产库核查无损（integrity ok、users 4 / orders 63 / products 3 未变）。

@@ -224,9 +224,18 @@ class TestNoProductionDomainsInContracts:
         assert offenders == []
 
     def test_contract_modules_are_declarative_only(self):
-        # No imports beyond stdlib typing/dataclasses + sibling contract modules.
-        allowed = re.compile(r"^(from|import)\s+(__future__|dataclasses|typing|cloud_test\.adapters)")
-        for path in ADAPTERS_DIR.glob("*.py"):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if re.match(r"^(from|import)\s", line):
-                    assert allowed.match(line), f"{path.name}: {line!r}"
+        """The six contract modules stay IO-free.
+
+        Commit 07 added implementations under ``local/`` and ``synthetic/`` plus a
+        ``factory.py``; the *contract* modules must still declare only
+        types/protocols (no network, no subprocess, no filesystem, no DB).
+        """
+        contract_modules = ("base.py", "auth.py", "course.py", "qr.py",
+                            "execution.py", "storage.py")
+        forbidden = re.compile(r"^\s*(import|from)\s+(os|socket|subprocess|sqlite3|urllib|"
+                               r"requests|http|shutil|pathlib|tempfile|json|time)\b")
+        for name in contract_modules:
+            text = (ADAPTERS_DIR / name).read_text(encoding="utf-8")
+            for lineno, line in enumerate(text.splitlines(), 1):
+                assert not forbidden.match(line), f"{name}:{lineno}: {line.strip()}"
+                assert "open(" not in line, f"{name}:{lineno}: {line.strip()}"

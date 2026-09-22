@@ -15,6 +15,7 @@ __all__ = [
     "AuthError",
     "Course",
     "ExecutionResult",
+    "ExecutionTask",
     "HealthStatus",
     "NotFoundError",
     "OrderRecord",
@@ -229,6 +230,22 @@ class ExecutionResult:
         if self.retryable:
             return TransientError(f"execution failed with exit_code={self.exit_code}")
         return PermanentError(f"execution failed with exit_code={self.exit_code}")
+
+
+@dataclass(frozen=True)
+class ExecutionTask:
+    """Minimal frozen context record (plan §17 / ADAPTER_CONTRACT §5.5).
+
+    Named ``ExecutionTask`` to avoid colliding with the frozen Commit-06
+    ``ExecutionContext`` Protocol, which remains the live interface
+    (order_id/attempt/heartbeat/log/progress). Password/cookie never appear here.
+    """
+
+    task_id: str
+    attempt: int = 0
+    runner_id: str = ""
+    work_ref: str = ""
+    log_ref: str = ""
 
 
 @dataclass(frozen=True)
