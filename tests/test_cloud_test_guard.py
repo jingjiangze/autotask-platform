@@ -47,9 +47,11 @@ def test_process_guard_allows_loopback():
 def test_require_ready_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setenv("CLOUD_TEST_MODE", "1")
     monkeypatch.setenv("CLOUD_TEST_EGRESS_REQUIRED", "1")
-    monkeypatch.setenv("CLOUD_TEST_EGRESS_MARKER", str(tmp_path / "missing.marker"))
+    monkeypatch.setattr(
+        guard, "MARKER_PATH", str(tmp_path / "missing.marker")
+    )
     monkeypatch.setattr(guard, "NFT_TABLE", "missing_cloud_test_table")
-    guard.require_ready.__module__
+
     with pytest.raises(RuntimeError, match="kernel nftables deny policy"):
         guard.require_ready()
 
@@ -60,11 +62,16 @@ def test_require_ready_fails_closed(monkeypatch, tmp_path):
 )
 def test_kernel_guard_rejects_zhihuishu():
     import subprocess
-    env = {k: v for k, v in os.environ.items()
-           if k.lower() not in ("http_proxy", "https_proxy")}
+
+    env = {
+        k: v for k, v in os.environ.items()
+        if k.lower() not in ("http_proxy", "https_proxy")
+    }
     p = subprocess.run(
-        ["curl", "--noproxy", "*", "--connect-timeout", "3",
-         "https://hike.zhihuishu.com/"],
+        [
+            "curl", "--noproxy", "*", "--connect-timeout", "3",
+            "https://hike.zhihuishu.com/",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -80,11 +87,16 @@ def test_kernel_guard_rejects_zhihuishu():
 )
 def test_kernel_guard_rejects_openai():
     import subprocess
-    env = {k: v for k, v in os.environ.items()
-           if k.lower() not in ("http_proxy", "https_proxy")}
+
+    env = {
+        k: v for k, v in os.environ.items()
+        if k.lower() not in ("http_proxy", "https_proxy")
+    }
     p = subprocess.run(
-        ["curl", "--noproxy", "*", "--connect-timeout", "3",
-         "https://api.openai.com/"],
+        [
+            "curl", "--noproxy", "*", "--connect-timeout", "3",
+            "https://api.openai.com/",
+        ],
         capture_output=True,
         text=True,
         check=False,
