@@ -35,11 +35,17 @@ async function registerExecutor(executorId: string, path: string): Promise<strin
 }
 
 async function seedOrder(orderId: string, userId: string): Promise<void> {
-  await DB.prepare(
-    "INSERT INTO users(id,username,password_hash,role,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-  )
-    .bind(userId, `u-${userId}`, "x", "user", "active", Date.now(), Date.now())
-    .run();
+  // mkUser 建过的用户直接用；否则补占位用户（幂等）
+  const exists = await DB.prepare("SELECT id FROM users WHERE id=?")
+    .bind(userId)
+    .first();
+  if (!exists) {
+    await DB.prepare(
+      "INSERT INTO users(id,username,password_hash,role,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+    )
+      .bind(userId, `u-${userId}`, "x", "user", "active", Date.now(), Date.now())
+      .run();
+  }
   await DB.prepare(
     "INSERT INTO orders(id,user_id,product_code,platform,account,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
   )
