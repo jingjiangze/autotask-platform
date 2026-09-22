@@ -11,7 +11,7 @@ private/
 *secret_key*
 *recovery_key*
 *admin_password*
-*admin_pw*
+*admin_pw
 *.zhs_cred
 .zhs_cred
 *credential*
@@ -43,7 +43,7 @@ cf/cf_state.json
 *.lock
 *.lock.osl
 *.lock.*
-
+ 
 # ---------- 2. 用户数据与业务数据 ----------
 orders/
 backups/
@@ -133,3 +133,14 @@ temp/
 .workbuddy/*
 !.workbuddy/memory/
 .claude/
+
+# ---------- 12. Cloud-test / deployment secrets ----------
+.cloud-test/
+cloud-test-data/
+cloudflare/**/.dev.vars
+cloudflare/**/.dev.vars.*
+cloudflare/**/.env
+cloudflare/**/.env.*
+*.secret
+*.credentials
+*.credentials.json
