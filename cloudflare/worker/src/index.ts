@@ -8,8 +8,10 @@
 import type { Env } from "./auth/auth-service";
 import { errorResponse } from "./errors";
 import { route } from "./router";
+import { PathCoordinator } from "./coordinator/path-coordinator";
 
 export type { Env };
+export { PathCoordinator };
 
 function handleHealth(): Response {
   return Response.json({

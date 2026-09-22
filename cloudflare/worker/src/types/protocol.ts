@@ -79,7 +79,8 @@ function keyForbidden(key: string): boolean {
   return FORBIDDEN_PAYLOAD_KEYS.some((f) => k === f || k.endsWith(`_${f}`) || k.endsWith(f));
 }
 
-function deepScanForbidden(value: unknown, path: string): string[] {
+/** 深度扫描 payload 中的凭据形 key（stage-cloud-09 起在 enqueue 源头强制）。 */
+export function deepScanForbidden(value: unknown, path: string): string[] {
   if (value === null || typeof value !== "object") return [];
   const hits: string[] = [];
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {

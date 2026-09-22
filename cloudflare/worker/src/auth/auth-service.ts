@@ -29,6 +29,8 @@ export interface Env {
   LEGACY_HMAC_SECRET?: string;
   /** stage-cloud-08：Executor 一次性 bootstrap 注册 token（§39）；未配置 = 注册关闭 */
   EXECUTOR_BOOTSTRAP_TOKEN?: string;
+  /** stage-cloud-09：调度中枢 DO（每 execution_path 一个实例） */
+  COORDINATOR: DurableObjectNamespace;
 }
 
 export type Json = Record<string, unknown>;
