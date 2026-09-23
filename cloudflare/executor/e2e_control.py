@@ -56,17 +56,11 @@ def main() -> int:
     base = args.base.rstrip("/")
 
     # 登录真实用户
-    cookie = None
-    for i in range(3):
-        try:
-            req = urllib.request.Request(f"{base}/api/v1/auth/login", method="POST",
-                data=json.dumps({"username": "real_owner", "password": "real-pass-123456"}).encode(),
-                headers={"Content-Type": "application/json", "User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                cookie = r.headers.get("Set-Cookie", "").split(";")[0]
-            break
-        except urllib.error.URLError:
-            time.sleep(0.5 * (i + 1))
+    req = urllib.request.Request(f"{base}/api/v1/auth/login", method="POST",
+        data=json.dumps({"username": "real_owner", "password": "real-pass-123456"}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        cookie = r.headers.get("Set-Cookie", "").split(";")[0]
     check("real_owner login", bool(cookie))
 
     # 1. 凭据明文查看（cloud-real-001 已有 enc-v2 种子）
