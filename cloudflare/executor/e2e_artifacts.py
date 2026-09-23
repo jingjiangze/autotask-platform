@@ -90,6 +90,12 @@ def main() -> int:
     lease = d.get("lease_id", "")
     check("claim (lease issued)", st == 200 and d.get("task_id") == task_id)
 
+    # ack：leased → running（状态机要求）
+    st_ack, ack = call(base, "POST", "/api/executor/v1/ack", token, {
+        "executor_id": f"exec-internal-art{suffix}", "execution_path": "internal",
+        "task_id": task_id, "lease_id": lease})
+    check("ack → running", st_ack == 200 and ack.get("status") == "running")
+
     content = f"stdout from live artifact test {suffix}\n".encode()
     q = urlencode({
         "executor_id": f"exec-internal-art{suffix}", "execution_path": "internal",
@@ -122,6 +128,8 @@ def main() -> int:
     st4, done = call(base, "POST", "/api/executor/v1/complete", token, {
         "executor_id": f"exec-internal-art{suffix}", "execution_path": "internal",
         "task_id": task_id, "lease_id": lease, "outcome": "succeeded"})
+    if not (st4 == 200 and done.get("status") == "succeeded"):
+        print(f"    [debug] complete status={st4} body={json.dumps(done, ensure_ascii=False)}")
     check("task complete (terminal mirror)", st4 == 200 and done.get("status") == "succeeded")
 
     print("\n== artifact E2E matrix ==")

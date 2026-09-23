@@ -223,6 +223,8 @@ export class PathCoordinator implements DurableObject {
       await this.scheduleAlarm(now);
       return Response.json({ ok: true, task: dispatch }, { status: 200 });
     }
+    // 空命中也要唤醒 alarm：让已过期租约的 stale 回收不依赖新任务入队（stage-22 修复）
+    await this.scheduleAlarm(now);
     return Response.json({ ok: true, task: null }, { status: 200 });
   }
 
@@ -246,6 +248,10 @@ export class PathCoordinator implements DurableObject {
     if (!["leased", "running"].includes(t.status)) {
       return fail("INVALID_TRANSITION", `cannot heartbeat in ${t.status}`);
     }
+    // stage-22 修复：过期租约不允许续期（即使 alarm 尚未回收）
+    if (t.lease_expires_at !== null && t.lease_expires_at <= Date.now()) {
+      return fail("LEASE_INVALID", "lease expired");
+    }
     const before = t.lease_expires_at ?? 0;
     t.lease_expires_at = Date.now() + this.leaseTtl();
     await this.putTask(t);
@@ -267,6 +273,14 @@ export class PathCoordinator implements DurableObject {
         return Response.json({ ok: true, status: t.status, idempotent: true });
       }
       return fail("LEASE_INVALID", "unknown task or lease mismatch");
+    }
+    // stage-22 修复：过期租约不允许 complete（先由 alarm 转 stale 走恢复流程）
+    if (
+      t.lease_expires_at !== null &&
+      t.lease_expires_at <= Date.now() &&
+      ["leased", "running"].includes(t.status)
+    ) {
+      return fail("LEASE_INVALID", "lease expired");
     }
     const tr = transitionTask(t.status, msg.outcome);
     if (!tr.ok) return fail("INVALID_TRANSITION", tr.reason ?? "");
