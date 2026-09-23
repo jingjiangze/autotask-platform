@@ -21,7 +21,8 @@ import {
 } from "../types/protocol";
 import { transitionTask } from "../tasks/task-state";
 
-export const DEFAULT_LEASE_TTL_MS = 10 * 60 * 1000;
+// §44/§101：lease 120s + heartbeat 30s（Cloudflare Free 预算内默认节奏）
+export const DEFAULT_LEASE_TTL_MS = 120 * 1000;
 export const DEFAULT_RETRY_DELAY_MS = 60 * 1000;
 
 interface QueueTask {

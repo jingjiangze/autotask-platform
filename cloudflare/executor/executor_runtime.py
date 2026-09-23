@@ -181,7 +181,7 @@ class ExecutorRuntime:
     """拉取式运行时主循环。handler 按 task_type 注册；未知类型按 TASK_INVALID 上报。"""
 
     def __init__(self, client: CentralClient, capabilities: list[str],
-                 poll_interval: float = 5.0, heartbeat_interval: float = 60.0,
+                 poll_interval: float = 15.0, heartbeat_interval: float = 30.0,
                  handler_stdout: bool = True):
         self.client = client
         self.capabilities = capabilities

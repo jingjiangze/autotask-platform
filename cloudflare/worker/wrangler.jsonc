@@ -9,6 +9,10 @@
   "observability": {
     "enabled": true
   },
+  // stage-cloud-24：每分钟 Cron（过期会话清理），占用 Free 限额 1/5
+  "triggers": {
+    "crons": ["*/1 * * * *"]
+  },
   // stage-cloud-04：D1 = 唯一业务数据源（计划 §6）。
   // database_id 为本地占位；真实部署（wrangler d1 create）后替换。
   "d1_databases": [

@@ -22,6 +22,15 @@ function handleHealth(): Response {
 }
 
 export default {
+  // stage-cloud-24：Cron */1 —— 过期会话清理 + 终态残留回收（§87，占用 1/5 Free Cron）
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at < ? OR revoked_at IS NOT NULL AND revoked_at < ?")
+        .bind(Date.now() - 24 * 3600 * 1000, Date.now() - 24 * 3600 * 1000)
+        .run(),
+    );
+  },
+
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
 
