@@ -231,30 +231,56 @@ class ExecutorRuntime:
             self.client.ack(task_id, lease_id)
             try:
                 result = handler(task["payload"], ctx)
-                self.client.complete(task_id, lease_id, "succeeded")
+                # 工件必须先于 complete：终态任务的上传会被服务端拒绝（LIVE 实证），
+                # 先传后终结避免 result_json 丢失并把 except 误导向二次 complete。
                 if self._capture_stdout and isinstance(result, dict):
                     self.client.upload_artifact(
                         task_id, lease_id,
                         json.dumps(result, ensure_ascii=False).encode(), "result_json")
+                self.client.complete(task_id, lease_id, "succeeded")
             except Exception as e:  # noqa: BLE001 —— 任何 handler 异常归一为可重试分类
                 code = "EXECUTOR_CRASH" if not isinstance(e, TimeoutError) else "PROCESS_TIMEOUT"
                 outcome = "retry_wait" if code in RETRYABLE_CODES else "failed"
                 self.client.complete(task_id, lease_id, outcome, code)
+            finally:
+                cleanup = getattr(self, "_cleanup", None)
+                if cleanup:
+                    try:
+                        cleanup(task_id)  # §110：任务结束删除隔离目录（日志已入 R2）
+                    except Exception:
+                        pass
         finally:
             stop_heartbeat.set()
 
 
 def main() -> int:  # pragma: no cover - 常驻入口
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--runner", choices=["demo", "chaoxing"], default=None,
+                    help="注册真实任务处理器（默认由 TASK_RUNNER 环境变量决定）")
+    args = ap.parse_args()
+
     cfg_url = os.environ.get("CENTRAL_URL", "")
     cfg_id = os.environ.get("EXECUTOR_ID", "")
     cfg_path = os.environ.get("EXECUTION_PATH", "internal")
     cfg_token = os.environ.get("EXECUTOR_TOKEN", "")
+    cfg_caps = [c for c in os.environ.get("EXECUTOR_CAPABILITIES", "").split(",") if c]
     if not cfg_url or not cfg_id or not cfg_token:
         print("CENTRAL_URL / EXECUTOR_ID / EXECUTOR_TOKEN must be set", flush=True)
         return 2
     client = CentralClient(cfg_url, cfg_id, cfg_path, token=cfg_token)
-    runtime = ExecutorRuntime(client, capabilities=os.environ.get("EXECUTOR_CAPABILITIES", "").split(","))
-    runtime.node_heartbeat()
+    runtime = ExecutorRuntime(client, capabilities=cfg_caps)
+
+    runner = args.runner or os.environ.get("TASK_RUNNER", "demo")
+    if runner == "chaoxing":
+        from runner_chaoxing import run_chaoxing, cleanup_task_dir
+        runtime.register_handler("chaoxing.run", run_chaoxing)
+        runtime._cleanup = cleanup_task_dir  # 任务结束清理隔离目录（§110）
+    else:
+        runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
+
+    client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
     runtime.run_forever()
     return 0
 

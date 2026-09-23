@@ -203,8 +203,10 @@ export async function executorComplete(env: Env, request: Request): Promise<Resp
   });
   if (res.status === 200) {
     try {
-      const out = (await res.clone().json()) as { status?: string };
-      if (out.status) {
+      const out = (await res.clone().json()) as { status?: string; idempotent?: boolean };
+      // 幂等路径（重复 complete，§15/§53）：任务状态早已镜像过，跳过重写，
+      // 否则迟到请求携带的 error_code 会污染已 succeeded 的任务记录。
+      if (out.status && !out.idempotent) {
         await mirrorTaskState(
           env,
           String(body["task_id"]),

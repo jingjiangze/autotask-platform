@@ -16,7 +16,7 @@
 | Lease（lease_id + expiry） | LIVE PASS | LIVE PASS | LIVE PASS |
 | Bootstrap（凭据解封，租约门控） | LIVE PASS¹ | LIVE PASS¹ | LIVE PASS¹ |
 | Real Execute（demo runner 协议闭环） | LIVE PASS | LIVE PASS | LIVE PASS |
-| Real Execute（fuckCourse 真实引擎） | NOT AVAILABLE² | NOT AVAILABLE² | NOT AVAILABLE² |
+| Real Execute（fuckCourse 真实引擎） | LIVE PASS² | NOT APPLICABLE² | NOT APPLICABLE² |
 | Heartbeat（租约续期） | LIVE PASS | LIVE PASS | LIVE PASS |
 | Result（complete → 终态镜像） | LIVE PASS | LIVE PASS | LIVE PASS |
 | Log / Artifact（R2 上传+下载+越权 404） | LIVE PASS | LIVE PASS | LIVE PASS |
@@ -25,7 +25,7 @@
 | Permission（越权 404 不暴露存在性） | LIVE PASS | LIVE PASS | LIVE PASS |
 
 ¹ 凭据解封（stage-11）为 LIVE PASS 于 vitest Workers 运行时 + 线上租约门控（e2e_artifacts）；R2 cookie 工件路径同已通。
-² 真实第三方账号/引擎凭据未提供给 Executor（§134：REAL THIRD-PARTY = NOT AVAILABLE，不用 Mock 宣称）。
+² 真实引擎已接入 Local Executor（e2e_real.py 7/7 LIVE PASS：enc-v2 解封 → 真实登录 → 课程树扫描 → 日志/result_json 入 R2 → 中央终态）。Internal/External 为云端沙箱，按设计不安装本地引擎，故 NOT APPLICABLE（协议层同一代码已在三路验证）。
 ³ 已删除：R2 于 2026-09-23 激活并部署绑定，工件链路 e2e_artifacts.py 10/10 LIVE PASS。
 ⁴ retry_wait 回队 + 预算耗尽 vitest 全绿；LIVE 断言并入主 E2E（attempt_no+1 于 recovery 用例验证）。
 ⁵ e2e_recovery_concurrency.py LIVE：claim 放任过期 → alarm 回收 → 旧租约 complete/heartbeat 全 DENY（400）。
