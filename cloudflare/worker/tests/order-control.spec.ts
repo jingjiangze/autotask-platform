@@ -2,7 +2,7 @@
 import { expect, describe, it, beforeEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import { applyMigrations, DB } from "./helpers";
-import { encryptCredential } from "../src/credentials/credential-service";
+import { encryptCredential } from "../src/storage/credentials";
 
 // stage-cloud-28：订单控制 / 凭据明文查看 / 查课表 —— 状态机与安全边界
 

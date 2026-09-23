@@ -70,7 +70,7 @@ def main() -> int:
 
     # 2. 新订单 + 查课表 LIVE（真实登录 tools_query_courses）
     st, o = call("POST", "/api/v1/orders", cookie=cookie,
-                 body={"product_code": "E2E", "platform": "chaoxing", "account": args.account})
+                 body={"product_code": "cx_video", "platform": "chaoxing", "account": args.account})
     check("order create for courses query", st == 201)
     oid = o["order_id"]
     st, q = call("POST", f"/api/v1/orders/{oid}/query-courses", cookie=cookie,
@@ -92,7 +92,7 @@ def main() -> int:
     check("executor register (local)", st == 201)
     env["EXECUTOR_TOKEN"] = reg["executor_token"]
     here = os.path.dirname(os.path.abspath(__file__))
-    proc = subprocess.Popen([PY, "-u", os.path.join(here, "executor_runtime.py"), "--runner", "chaoxing"],
+    proc = subprocess.Popen([PY, "-u", os.path.join(here, "agent", "main.py"), "--runner", "chaoxing"],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
                             cwd=here)
     try:

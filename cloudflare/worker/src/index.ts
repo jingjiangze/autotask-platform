@@ -8,7 +8,7 @@
 import type { Env } from "./auth/auth-service";
 import { errorResponse } from "./errors";
 import { route } from "./router";
-import { PathCoordinator } from "./coordinator/path-coordinator";
+import { PathCoordinator } from "./coordination/path-coordinator";
 import { APP_HTML } from "./web/app-html";
 
 export type { Env };

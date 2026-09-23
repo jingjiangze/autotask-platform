@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import { applyMigrations } from "./helpers";
 import { validateTaskDispatch } from "../src/types/protocol";
-import { PathCoordinator } from "../src/coordinator/path-coordinator";
+import { PathCoordinator } from "../src/coordination/path-coordinator";
 
 // stage-cloud-09 验收（计划 §41/§83）：
 // enqueue 凭据红线 / FIFO+能力匹配 claim / dispatch 契约校验零违规 /

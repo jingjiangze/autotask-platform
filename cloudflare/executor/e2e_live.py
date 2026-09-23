@@ -103,7 +103,7 @@ def main() -> int:
 
     # 用管理员渠道种商品不可行（无 admin API 种子），直接创建订单校验 product 存在性失败则标注
     st3, order = call(base, "POST", "/api/v1/orders", body={
-        "product_code": "E2E", "platform": "demo", "account": "e2e@test"},
+        "product_code": "cx_video", "platform": "demo", "account": "e2e@test"},
         cookie=cookie if cookie else None)
     # 未登录 cookie 为空 → 应 401；此处需要真实 cookie —— login 的 Set-Cookie 在响应头
     # 上面的 call 不返回 headers，改用底层再取一次
@@ -117,7 +117,7 @@ def main() -> int:
     check("E2E-02 Create order (needs product seed)", False)
     RESULTS.pop()
     st4, order2 = call(base, "POST", "/api/v1/orders", body={
-        "product_code": "E2E", "platform": "demo", "account": "e2e@test"}, cookie=raw_cookie)
+        "product_code": "cx_video", "platform": "demo", "account": "e2e@test"}, cookie=raw_cookie)
     if st4 == 404:
         # 商品未种：此环境中无 admin 商品 API → 记 NOT AVAILABLE 并用 admin 会话种入
         RESULTS.append(("E2E-02 Create order", "LIVE FAIL (no product seed API)"))

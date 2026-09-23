@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import { applyMigrations } from "./helpers";
-import { PathCoordinator } from "../src/coordinator/path-coordinator";
+import { PathCoordinator } from "../src/coordination/path-coordinator";
 
 // stage-cloud-15 验收（计划 §15/§44/§52/§53）：
 // 重试预算（max_attempts 耗尽 → failed 不再回队）/

@@ -20,7 +20,7 @@ import {
 } from "./executors/executor-api";
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
 import { getSessionUser } from "./auth/session-service";
-import { releaseCredentials, storeCredential } from "./credentials/credential-service";
+import { releaseCredentials, storeCredential } from "./storage/credentials";
 import { myOrders, orderDetail, orderByAccount } from "./orders/order-query";
 import { guestQuery } from "./orders/guest-query";
 import {
@@ -30,7 +30,7 @@ import {
   listProducts,
   taskDetail,
 } from "./orders/order-service";
-import { downloadArtifact, uploadArtifact } from "./artifacts/artifact-service";
+import { downloadArtifact, uploadArtifact } from "./storage/artifacts";
 import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };

@@ -55,7 +55,7 @@
 | retry_wait 定时回队 + 预算耗尽 → failed | LIVE PASS（vitest） | retry-fencing.spec（RETRY_BUDGET_EXHAUSTED） |
 | Worker 重新部署后 D1 状态存活 | LIVE PASS | b2a42749→b5c8e074 两次部署后 E2E 查询数据完好 |
 | DO 状态可重建 | LIVE PASS | DO storage 持久化 + D1 为持久真相（§25） |
-| Executor 重启后孤儿任务清理 | CODE READY（executor_runtime 重连即重心跳；孤儿扫描待 12 真实接入） | — |
+| Executor 重启后孤儿任务清理 | CODE READY（agent/main.py 重连即重心跳；孤儿扫描待 12 真实接入） | — |
 
 ## 4. 并发（stage-23，LIVE）
 

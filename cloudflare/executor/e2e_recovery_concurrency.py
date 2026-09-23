@@ -76,7 +76,7 @@ def main() -> int:
     task_ids = []
     for i in range(3):
         _, o = call(base, "POST", "/api/v1/orders", body={
-            "product_code": "E2E", "platform": "demo", "account": "c@t"}, cookie=cookie)
+            "product_code": "cx_video", "platform": "demo", "account": "c@t"}, cookie=cookie)
         _, t = call(base, "POST", f"/api/v1/orders/{o['order_id']}/tasks", body={
             "execution_path": "external", "task_type": "demo.echo",
             "required_capabilities": ["demo"], "payload": {"i": i}}, cookie=cookie)
@@ -112,7 +112,7 @@ def main() -> int:
     # ---- stage-22 恢复：claim 后放任租约过期 ----
     print("== stage-22: lease expiry recovery (120s lease) ==")
     _, o = call(base, "POST", "/api/v1/orders", body={
-        "product_code": "E2E", "platform": "demo", "account": "r@t"}, cookie=cookie)
+        "product_code": "cx_video", "platform": "demo", "account": "r@t"}, cookie=cookie)
     _, t = call(base, "POST", f"/api/v1/orders/{o['order_id']}/tasks", body={
         "execution_path": "external", "task_type": "demo.echo",
         "required_capabilities": ["demo"], "payload": {"rec": 1}}, cookie=cookie)

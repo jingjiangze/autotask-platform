@@ -93,7 +93,7 @@ def main() -> int:
     print("  ... launching REAL executor (fuckCourse engine, real login) ...")
     started = time.time()
     proc = subprocess.Popen(
-        [PY, "-u", os.path.join(os.path.dirname(os.path.abspath(__file__)), "executor_runtime.py"),
+        [PY, "-u", os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent", "main.py"),
          "--runner", "chaoxing"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         encoding="utf-8", errors="replace", cwd=os.path.dirname(os.path.abspath(__file__)))

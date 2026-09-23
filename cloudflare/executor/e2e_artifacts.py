@@ -74,7 +74,7 @@ def main() -> int:
 
     # 订单 + 任务
     st, order = call(base, "POST", "/api/v1/orders", body={
-        "product_code": "E2E", "platform": "demo", "account": "art@test"}, cookie=cookie)
+        "product_code": "cx_video", "platform": "demo", "account": "art@test"}, cookie=cookie)
     check("order create", st == 201)
     st, task = call(base, "POST", f"/api/v1/orders/{order['order_id']}/tasks", body={
         "execution_path": "internal", "task_type": "demo.echo",
