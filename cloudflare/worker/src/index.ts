@@ -9,6 +9,7 @@ import type { Env } from "./auth/auth-service";
 import { errorResponse } from "./errors";
 import { route } from "./router";
 import { PathCoordinator } from "./coordinator/path-coordinator";
+import { APP_HTML } from "./web/app-html";
 
 export type { Env };
 export { PathCoordinator };
@@ -43,6 +44,14 @@ export default {
 
     const api = await route(request, env);
     if (api) return api;
+
+    // stage-cloud-27：Worker 托管前端 —— 非 /api 的 GET（含 / 与无扩展名路径）回 SPA，
+    // 使 Executor 回调与浏览器共用同一域；API 与 /health 不受影响。
+    if (request.method === "GET" && !pathname.startsWith("/api/") && !pathname.includes(".")) {
+      return new Response(APP_HTML, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+      });
+    }
 
     return errorResponse(404, "NOT_FOUND");
   },
