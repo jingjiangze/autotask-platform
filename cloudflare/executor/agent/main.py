@@ -80,12 +80,7 @@ class ExecutorRuntime:
         while not self.stop_event.is_set():
             if max_tasks is not None and done >= max_tasks:
                 return done
-            try:
-                task = self.client.claim(self.capabilities)
-            except OSError:
-                # 瞬时网络/TLS 抖动（如 SSL UNEXPECTED_EOF）：跳过本轮，下轮再拉
-                time.sleep(self.poll_interval)
-                continue
+            task = self.client.claim(self.capabilities)
             if not task:
                 time.sleep(self.poll_interval)
                 continue
