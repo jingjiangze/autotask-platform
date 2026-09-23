@@ -1,183 +1,291 @@
 /**
- * stage-cloud-27 — Worker 托管前端（单文件 SPA，零外部依赖）。
+ * stage-cloud-27b — Worker 托管前端（对齐本地 order_platform 界面与功能）。
  *
- * 由 index.ts 对所有非 /api、非 /health 的 GET 请求返回。
- * 调用面：auth register/login/logout、me、products、my/orders、
- *         orders/{id}、orders/{id}/tasks、guest/query（§ 路由契约见 router.ts）。
+ * 深色 Tabler 风格 + 页面结构复刻本地版：
+ *   首页橱窗（hero + 商品卡 + 统计卡）/ 下单向导 / 我的订单（按账号分组）/
+ *   订单详情（执行记录 + 入队）/ 查单（访客前缀）/ 批量下单。
+ * 差异（设计使然）：密码不明文回传（enc-v2 托管，仅 executor 租约期解封）；
+ * 课程查询工具与暂停/恢复为本地引擎进程能力，云端不入此版。
  */
 export const APP_HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh" data-bs-theme="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>自动任务平台 · Autotask Central</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>自动任务平台</title>
 <style>
-  :root{--bg:#f5f7fa;--card:#fff;--line:#e4e8ee;--tx:#1f2937;--mut:#6b7280;--pri:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font:15px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--tx)}
-  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 22px;display:flex;align-items:center;gap:18px;position:sticky;top:0;z-index:5}
-  header h1{font-size:18px;font-weight:700}
-  header .sp{flex:1}
-  .who{color:var(--mut);font-size:14px}
-  main{max-width:980px;margin:22px auto;padding:0 16px}
-  .tabs{display:flex;gap:8px;margin-bottom:16px}
-  .tabs button{border:1px solid var(--line);background:var(--card);padding:8px 18px;border-radius:8px;cursor:pointer;font-size:15px}
-  .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
-  .card h2{font-size:16px;margin-bottom:10px}
-  input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
-  label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-  .row{display:flex;gap:10px}.row>*{flex:1}
-  button.pri{background:var(--pri);color:#fff;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;font:inherit}
-  button.pri:disabled{opacity:.55;cursor:default}
-  button.ghost{background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}
-  table{width:100%;border-collapse:collapse;font-size:14px}
-  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
-  th{color:var(--mut);font-weight:600;font-size:13px}
-  tr.click{cursor:pointer}tr.click:hover{background:#f0f5ff}
-  .st{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12.5px}
-  .st.pending{background:#fef3c7;color:#92400e}.st.processing{background:#dbeafe;color:#1d4ed8}
-  .st.succeeded{background:#dcfce7;color:#166534}.st.failed,.st.canceled{background:#fee2e2;color:#991b1b}
-  .st.leased,.st.running{background:#e0e7ff;color:#3730a3}.st.retry_wait{background:#ffedd5;color:#9a3412}
-  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;max-width:80vw;z-index:9}
-  .toast.show{opacity:1}
-  .mono{font-family:ui-monospace,Consolas,monospace;font-size:13px}
-  .muted{color:var(--mut);font-size:13px}
-  pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:12.5px}
-  details summary{cursor:pointer;color:var(--pri);font-size:14px}
+:root{--bg:#171b26;--card:#1f2433;--card2:#232b3b;--line:rgba(255,255,255,.08);--tx:#dfe5f1;--mut:#8b94a7;--pri:#6366f1;--cyan:#22d3ee}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:15px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--tx)}
+a{color:var(--cyan);text-decoration:none}
+header.nav{background:var(--card);border-bottom:1px solid var(--line);padding:0 18px;height:56px;display:flex;align-items:center;gap:6px;position:sticky;top:0;z-index:9}
+.nav .brand{font-size:18px;font-weight:800;margin-right:14px;white-space:nowrap}
+.nav a.nl{padding:6px 12px;border-radius:8px;color:var(--mut);font-size:14.5px;cursor:pointer;border:0;background:none;font-family:inherit}
+.nav a.nl:hover{color:var(--tx)}
+.nav a.nl.on{color:#fff;background:rgba(99,102,241,.22)}
+.nav .sp{flex:1}
+.container{max-width:1060px;margin:0 auto;padding:0 16px}
+.hero{padding:2.2rem 0 .6rem}
+.hero h1{font-size:34px;font-weight:800;background:linear-gradient(90deg,#fff 30%,#a5b4fc 70%,#67e8f9);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--mut);margin-top:6px}
+.row{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0}
+.col{flex:1 1 280px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card.sm{padding:14px}
+.glow{box-shadow:0 8px 30px rgba(99,102,241,.25)}
+.card h3{font-size:17px;margin:6px 0 4px}
+.muted,.text-secondary{color:var(--mut)}
+.small{font-size:13px}
+.avatar{width:40px;height:40px;border-radius:10px;background:rgba(99,102,241,.18);display:grid;place-items:center;font-size:20px}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12.5px;font-weight:600}
+.b-yellow{background:rgba(247,103,7,.15);color:#ff9f43}.b-blue{background:rgba(32,110,180,.25);color:#7cb8ec}
+.b-green{background:rgba(47,179,68,.16);color:#6cd982}.b-red{background:rgba(214,57,57,.18);color:#f08a8a}
+.b-purple{background:rgba(174,109,255,.16);color:#c3a1fa}.b-gray{background:rgba(255,255,255,.09);color:var(--mut)}
+.b-orange{background:rgba(255,159,67,.15);color:#ffb45e}
+.btn{border:0;border-radius:8px;padding:9px 18px;cursor:pointer;font:inherit;font-size:14.5px;background:linear-gradient(135deg,var(--pri),#8b5cf6);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.out{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.subheader{color:var(--mut);font-size:13px}
+.h1{font-size:28px;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12.5px;white-space:nowrap}
+details.acc summary{cursor:pointer;padding:10px;list-style:none}
+details.acc summary:hover{background:rgba(255,255,255,.03)}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#171b26;color:var(--tx)}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--pri)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.wiz-num{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.08);display:inline-grid;place-items:center;font-size:13px;font-weight:700;color:#c9d3e3;margin-right:8px}
+.wiz-num.on{background:linear-gradient(135deg,#6366f1,#22d3ee);color:#fff}
+.empty{text-align:center;padding:60px 0}
+.empty-header{font-size:44px}.empty-title{font-size:18px;margin:8px 0 2px}
+footer{padding:1.6rem 0;color:var(--mut);font-size:.8rem;text-align:center}
+.toast{position:fixed;bottom:22px;right:22px;background:#2b3245;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:99;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.toast.show{opacity:1}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
 </style>
 </head>
 <body>
-<header>
-  <h1>⚙️ 自动任务平台</h1>
-  <span class="who" id="who"></span>
+<header class="nav">
+  <span class="brand">⚡ 自动任务平台</span>
+  <a class="nl" data-v="home" onclick="go('home')">首页</a>
+  <a class="nl" data-v="my" onclick="go('my')">我的订单</a>
+  <a class="nl" data-v="query" onclick="go('query')">查单</a>
+  <a class="nl" data-v="batch" onclick="go('batch')">批量下单</a>
   <span class="sp"></span>
-  <button class="ghost" id="authBtn" onclick="openAuth()">登录 / 注册</button>
-  <button class="ghost" id="outBtn" style="display:none" onclick="logout()">退出</button>
+  <span class="small muted" id="who"></span>
+  <a class="nl" id="authBtn" onclick="go('auth')">登录 / 注册</a>
+  <a class="nl" id="outBtn" style="display:none" onclick="logout()">退出</a>
 </header>
-<main>
-  <div class="tabs">
-    <button class="on" id="tab-o" onclick="tab('o')">我的订单</button>
-    <button id="tab-g" onclick="tab('g')">访客查单</button>
+<div class="container">
+
+<div id="v-home">
+  <div class="hero"><h1>任务交给自动化，时间留给自己</h1>
+  <p>选择商品下单，云端自动排队执行；全程日志可查、进度实时可见。凭据加密托管（enc-v2），仅执行期按租约解封。</p></div>
+  <div class="row" id="productCards"><div class="card col muted">加载中…</div></div>
+  <div class="stat-row" id="statCards" style="display:none"></div>
+  <p class="text-secondary" style="margin:14px 0">没有账号？<a onclick="go('auth')" style="cursor:pointer">注册</a> 后下单 · 已有订单？<a onclick="go('query')" style="cursor:pointer">凭单号查单</a></p>
+</div>
+
+<div id="v-auth" style="display:none">
+  <div class="row justify-content-center"><div class="card col" style="max-width:460px">
+    <h3>登录 / 注册</h3>
+    <label>用户名（3-32 位字母数字_-）</label><input id="lg-user" autocomplete="username">
+    <label>密码（≥8 位）</label><input id="lg-pass" type="password" autocomplete="current-password">
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn" onclick="doLogin()">登录</button>
+      <button class="btn out" onclick="doRegister()">注册新账号</button>
+    </div>
+    <p class="small muted" style="margin-top:12px">注册即视为知悉并接受免责条款：仅供个人学习研究使用。</p>
+  </div></div>
+</div>
+
+<div id="v-my" style="display:none">
+  <h3 style="margin:20px 0 6px">📒 我的订单</h3>
+  <p class="small muted">同账号多单已合并分组，点击展开；凭据密文托管，明文不出解封通道</p>
+  <div class="card" style="padding:0;overflow:auto;margin-top:12px">
+    <table><thead><tr><th>单号</th><th>商品 / 课程</th><th>账号</th><th>状态</th><th>时间</th><th></th></tr></thead>
+    <tbody id="myOrders"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody></table>
   </div>
+  <div id="emptyMy"></div>
+</div>
 
-  <section id="view-o">
-    <div class="card" id="authCard" style="display:none">
-      <h2>登录已有账号，或注册新账号</h2>
-      <div class="row">
-        <div><label>用户名</label><input id="lg-user" autocomplete="username"></div>
-        <div><label>密码（≥8 位）</label><input id="lg-pass" type="password" autocomplete="current-password"></div>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:10px">
-        <button class="pri" onclick="login()">登录</button>
-        <button class="ghost" onclick="register()">注册</button>
-      </div>
-      <p class="muted" style="margin-top:10px">登录后可下单、入队任务并查看执行结果与日志。</p>
+<div id="v-order" style="display:none"></div>
+
+<div id="v-buy" style="display:none"></div>
+
+<div id="v-query" style="display:none">
+  <h3 style="margin:20px 0 6px">🔎 查单</h3>
+  <div class="card">
+    <p class="small muted" style="margin-bottom:8px">输入订单号（支持前缀），无需登录。返回脱敏的单号前缀。</p>
+    <div style="display:flex;gap:10px">
+      <input id="g-code" placeholder="订单号或前缀，如 cloud-real" class="mono">
+      <button class="btn" style="flex:0 0 auto" onclick="guestQuery()">查询</button>
     </div>
+    <table style="margin-top:12px"><thead><tr><th>单号前缀</th><th>商品</th><th>状态</th><th>更新时间</th></tr></thead>
+    <tbody id="g-res"><tr><td colspan="4" class="muted">—</td></tr></tbody></table>
+  </div>
+</div>
 
-    <div id="userArea" style="display:none">
-      <div class="card">
-        <h2>新建订单</h2>
-        <div class="row">
-          <div><label>商品（来自商品表）</label><select id="no-product"></select></div>
-          <div><label>执行平台</label><select id="no-platform"><option value="chaoxing">超星 chaoxing</option><option value="xuexi">学习通</option><option value="other">其他</option></select></div>
-        </div>
-        <label>网课账号（选填，凭据经管理员加密录入）</label>
-        <input id="no-account" placeholder="账号或手机号">
-        <div style="margin-top:14px"><button class="pri" id="createBtn" onclick="createOrder()">创建订单</button></div>
-      </div>
+<div id="v-batch" style="display:none">
+  <h3 style="margin:20px 0 6px">📦 批量下单</h3>
+  <div class="card">
+    <label>每行一条：平台,账号,课程ID（课程可空；密码由管理员加密录入后自动关联）</label>
+    <textarea id="b-lines" rows="6" class="mono" placeholder="chaoxing,13800000000,254722149&#10;chaoxing,13900000000,"></textarea>
+    <label>执行路径</label>
+    <select id="b-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>
+    <button class="btn" style="width:100%;margin-top:14px" id="b-btn" onclick="batchSubmit()">批量提交</button>
+    <pre id="b-out" style="display:none;margin-top:12px"></pre>
+  </div>
+</div>
 
-      <div class="card">
-        <div style="display:flex;align-items:center">
-          <h2 style="flex:1">我的订单</h2>
-          <button class="ghost" onclick="loadOrders()">刷新</button>
-        </div>
-        <table><thead><tr><th>订单号</th><th>商品</th><th>平台</th><th>状态</th><th>更新时间</th></tr></thead>
-        <tbody id="orders"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody></table>
-      </div>
-
-      <div class="card" id="detail" style="display:none"></div>
-    </div>
-  </section>
-
-  <section id="view-g" style="display:none">
-    <div class="card">
-      <h2>访客查单</h2>
-      <p class="muted" style="margin-bottom:8px">输入订单号（支持前缀），无需登录。</p>
-      <div class="row">
-        <div><input id="g-code" placeholder="订单号或前缀，如 cloud-real" class="mono"></div>
-        <div style="flex:0 0 auto"><button class="pri" onclick="guestQuery()">查询</button></div>
-      </div>
-      <table style="margin-top:12px"><thead><tr><th>订单号</th><th>商品</th><th>状态</th><th>更新时间</th></tr></thead>
-      <tbody id="g-res"><tr><td colspan="4" class="muted">—</td></tr></tbody></table>
-    </div>
-  </section>
-</main>
+</div>
+<footer>自动任务平台 · 仅供个人本地测试与学习研究使用 · 不提供对外服务 · 进度数据仅供参考，一切以学习平台官方为准 · 使用即视为知悉并接受全部免责条款</footer>
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
-const stLabel=s=>'<span class="st '+s+'">'+s+'</span>';
-const fmt=t=>t?new Date(t).toLocaleString('zh-CN',{hour12:false}):'—';
-let me=null, pollTimer=null, currentOrder=null;
+const PICON={"chaoxing":"🚀","zhs":"🌿","zhsqr":"📷"};
+const BADGE={pending:["b-yellow","排队中"],queued:["b-yellow","排队中"],processing:["b-blue","执行中"],
+  leased:["b-purple","已认领"],running:["b-blue","执行中"],succeeded:["b-green","已完成"],
+  done:["b-green","已完成"],failed:["b-red","失败"],canceled:["b-gray","已取消"],retry_wait:["b-orange","等待重试"]};
+function badge(s){const b=BADGE[s]||["b-gray",s];return '<span class="badge '+b[0]+'">'+b[1]+'</span>'}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fmt(t){return t?new Date(t).toLocaleString("zh-CN",{hour12:false}):"—"}
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
+let me=null,products=[],pollTimer=null,currentOrder=null;
 
-function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)}
-async function api(path,opt={}){opt.headers=Object.assign({'Content-Type':'application/json'},opt.headers||{});
+async function api(path,opt={}){opt.headers=Object.assign({"Content-Type":"application/json"},opt.headers||{});
   const r=await fetch(path,opt);let b={};try{b=await r.json()}catch(e){}
-  if(!r.ok)throw new Error((b.error&&b.error.message?b.error.message:'HTTP '+r.status));
-  return b}
-function tab(k){for(const x of['o','g']){$('tab-'+x).classList.toggle('on',x===k);$('view-'+x).style.display=x===k?'':'none'}}
+  if(!r.ok)throw new Error(b.error&&b.error.message?b.error.message:"HTTP "+r.status);return b}
 
-async function boot(){try{const b=await api('/api/v1/me');me=b.user||b}catch(e){me=null}
-  renderAuth();
-  if(me){$('userArea').style.display='';loadProducts();loadOrders();startPoll()}
-  else{$('authCard').style.display=''}}
-function renderAuth(){if(me){$('who').textContent='已登录：'+me.username;$('authBtn').style.display='none';$('outBtn').style.display='';$('authCard').style.display='none';$('userArea').style.display=''}
-  else{$('who').textContent='未登录';$('authBtn').style.display='';$('outBtn').style.display='none';$('authCard').style.display='';$('userArea').style.display='none'}}
+function go(v,arg){location.hash="#"+v+(arg?"/"+arg:"");render(v,arg)}
+function render(v,arg){
+  document.querySelectorAll(".nl[data-v]").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(v==="buy"&&a.dataset.v==="home")));
+  for(const x of["home","auth","my","order","buy","query","batch"])$("v-"+x).style.display=x===v?"":"none";
+  clearInterval(pollTimer);
+  if(v==="home")drawHome();
+  if(v==="my"){drawMy();pollTimer=setInterval(drawMy,5000)}
+  if(v==="order")drawOrder(arg);if(v==="buy")drawBuy(arg);
+  if(v==="query")setTimeout(()=>$("g-code").focus(),50);
+  if(v==="auth"&&me)go("my");
+}
+window.addEventListener("hashchange",()=>{const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])});
 
-async function register(){try{await api('/api/v1/auth/register',{method:'POST',body:JSON.stringify({username:$('lg-user').value.trim(),password:$('lg-pass').value})});toast('注册成功，自动登录中');await login(true)}catch(e){toast('注册失败：'+e.message)}}
-async function login(silent){try{await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify({username:$('lg-user').value.trim(),password:$('lg-pass').value})});await boot();if(!silent)toast('登录成功')}catch(e){if(!silent)toast('登录失败：'+e.message)}}
-async function logout(){try{await api('/api/v1/auth/logout',{method:'POST'})}catch(e){}me=null;renderAuth();toast('已退出')}
+async function boot(){try{const b=await api("/api/v1/me");me=b.user}catch(e){me=null}
+  $("authBtn").style.display=me?"none":"";$("outBtn").style.display=me?"":"none";
+  $("who").textContent=me?"👋 "+me.username:"未登录";
+  try{const p=await api("/api/v1/products");products=p.products||[]}catch(e){products=[]}
+  const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])}
 
-async function loadProducts(){try{const b=await api('/api/v1/products');const sel=$('no-product');sel.innerHTML='';
-  (b.products||[]).forEach(p=>{const o=document.createElement('option');o.value=p.code;o.textContent=p.name+' ('+p.code+')';sel.appendChild(o)});
-  if(!sel.children.length){const o=document.createElement('option');o.textContent='（暂无启用商品）';sel.appendChild(o)}}catch(e){}}
-async function createOrder(){const btn=$('createBtn');btn.disabled=true;
-  try{const b=await api('/api/v1/orders',{method:'POST',body:JSON.stringify({product_code:$('no-product').value,platform:$('no-platform').value,account:$('no-account').value.trim()})});
-  toast('订单已创建：'+b.order_id);loadOrders()}catch(e){toast('创建失败：'+e.message)}finally{btn.disabled=false}}
+/* ---- 首页橱窗 ---- */
+async function drawHome(){
+  $("productCards").innerHTML=products.length?products.map(p=>
+    '<div class="card col glow" style="min-height:190px;display:flex;flex-direction:column">'+
+    '<div class="avatar">'+(PICON[p.platform]||"⚙")+'</div><h3>'+esc(p.name)+'</h3>'+
+    '<p class="text-secondary small" style="flex:1">'+esc(p.description||"")+'</p>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">'+
+    '<span class="badge b-green">'+esc(p.platform)+'</span>'+
+    '<button class="btn sm" onclick="go(\\'buy\\',\\''+esc(p.code)+'\\')">立即下单</button></div></div>').join("")
+    :'<div class="card col muted">暂无在售商品（管理端自助上架未开放）</div>';
+  if(me){try{const b=await api("/api/v1/my/orders");const L=b.orders||[];
+    const nAll=L.length,nDone=L.filter(o=>["succeeded","done"].includes(o.status)).length,
+          nRun=L.filter(o=>["pending","processing","leased","running","retry_wait"].includes(o.status)).length;
+    $("statCards").style.display="";$("statCards").innerHTML=
+      stat("累计订单",nAll)+stat("已完成",nDone,"color:#6cd982")+stat("排队/执行中",nRun,"color:#7cb8ec")+stat("在售商品",products.length);
+  }catch(e){$("statCards").style.display="none"}}else $("statCards").style.display="none";
+  function stat(l,n,c){return '<div class="card sm glow"><div class="subheader">'+l+'</div><div class="h1" style="'+(c||"")+'">'+n+'</div></div>'}}
 
-async function loadOrders(){if(!me)return;try{const b=await api('/api/v1/my/orders');
-  const tb=$('orders');const list=b.orders||[];
-  tb.innerHTML=list.length?list.map(o=>'<tr class="click" onclick="showDetail(\\''+o.order_id+'\\')"><td class="mono">'+o.order_id+'</td><td>'+o.product_code+'</td><td>'+o.platform+'</td><td>'+stLabel(o.status)+'</td><td class="muted">'+fmt(o.updated_at)+'</td></tr>').join('')
-    :'<tr><td colspan="5" class="muted">暂无订单 —— 先在上方创建一个</td></tr>'}catch(e){}}
-function startPoll(){clearInterval(pollTimer);pollTimer=setInterval(()=>{if(me)loadOrders();if(currentOrder)refreshDetail(false)},5000)}
+/* ---- 登录注册 ---- */
+async function doRegister(){try{await api("/api/v1/auth/register",{method:"POST",body:JSON.stringify({username:$("lg-user").value.trim(),password:$("lg-pass").value})});toast("注册成功，自动登录中");await doLogin(true)}catch(e){toast("注册失败："+e.message)}}
+async function doLogin(silent){try{await api("/api/v1/auth/login",{method:"POST",body:JSON.stringify({username:$("lg-user").value.trim(),password:$("lg-pass").value})});await boot();go("my");if(!silent)toast("登录成功")}catch(e){if(!silent)toast("登录失败："+e.message)}}
+async function logout(){try{await api("/api/v1/auth/logout",{method:"POST"})}catch(e){}me=null;go("home");boot()}
 
-async function showDetail(id){currentOrder=id;$('detail').style.display='';await refreshDetail(true)}
-async function refreshDetail(full){try{const b=await api('/api/v1/orders/'+currentOrder);const o=b.order||{};const at=b.attempts||[];
-  let html='<h2>订单详情 <span class="mono muted">'+currentOrder+'</span> '+stLabel(o.status)+'</h2>';
-  html+='<p class="muted">商品 '+o.product_code+' ｜ 平台 '+o.platform+' ｜ 账号 '+(o.account||'（托管）')+' ｜ 创建 '+fmt(o.created_at)+' ｜ 更新 '+fmt(o.updated_at)+'</p>';
-  html+='<h2 style="margin-top:14px">执行记录</h2>';
-  html+=at.length?'<table><thead><tr><th>Attempt</th><th>状态</th><th>错误码</th><th>开始</th><th>结束</th></tr></thead><tbody>'
-    +at.map(a=>'<tr><td class="mono">#'+a.attempt_no+'</td><td>'+stLabel(a.status)+'</td><td class="mono">'+(a.error_code||'—')+'</td><td class="muted">'+fmt(a.started_at)+'</td><td class="muted">'+fmt(a.finished_at)+'</td></tr>').join('')+'</tbody></table>'
-    :'<p class="muted">暂无执行记录 —— 入队一个任务开始执行</p>';
-  const canEnqueue=['pending','processing'].includes(o.status);
-  html+='<details style="margin-top:14px"'+(canEnqueue?' open':'')+'><summary>'+(canEnqueue?'入队任务':'（订单已终态，不能再入队）')+'</summary>';
-  if(canEnqueue){html+='<label>任务类型</label><select id="t-type"><option value="chaoxing.run">chaoxing.run（超星刷课）</option><option value="demo.echo">demo.echo（连通性测试）</option></select>';
-    html+='<label>执行路径</label><select id="t-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>';
-    html+='<label>Payload（JSON）</label><textarea id="t-payload" rows="4" class="mono">{"courses":"254722149","speed":2.0,"timeout_seconds":600}</textarea>';
-    html+='<div style="margin-top:10px"><button class="pri" onclick="enqueue()">入队</button></div>'}
-  html+='</details>';
-  $('detail').innerHTML=html}catch(e){if(full)toast('详情加载失败：'+e.message)}}
-async function enqueue(){try{let payload;try{payload=JSON.parse($('t-payload').value)}catch(e){throw new Error('payload 不是合法 JSON')}
-  const b=await api('/api/v1/orders/'+currentOrder+'/tasks',{method:'POST',body:JSON.stringify({execution_path:$('t-path').value,task_type:$('t-type').value,required_capabilities:[$('t-type').value.split('.')[0]],payload})});
-  toast('任务已入队：'+b.task_id);refreshDetail(false)}catch(e){toast('入队失败：'+e.message)}}
+/* ---- 下单向导（简化三步：课程查询为本地进程内工具，云端课程号手动填写） ---- */
+function drawBuy(code){
+  const p=products.find(x=>x.code===code);
+  $("v-buy").innerHTML='<h3 style="margin:20px 0 6px"><span class="wiz-num on">1</span>确认商品'+
+    '<span class="wiz-num" style="margin-left:16px">2</span>填写账号与课程'+
+    '<span class="wiz-num" style="margin-left:16px">3</span>提交</h3>'+
+    (p?'<div class="card"><div class="avatar">'+(PICON[p.platform]||"⚙")+'</div><h3>'+esc(p.name)+'</h3>'+
+      '<p class="text-secondary small">'+esc(p.description||"")+'</p>'+
+      '<label>网课账号（手机号/学号）</label><input id="bw-acc" placeholder="13800000000">'+
+      '<label>课程 ID（超星课程数字串，可多个逗号分隔；留空则创建订单后从详情页入队）</label>'+
+      '<input id="bw-courses" class="mono" placeholder="254722149">'+
+      '<label>执行路径</label><select id="bw-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>'+
+      '<p class="small muted" style="margin-top:10px">🔐 账号密码不在网页明文收集：凭据由管理端 enc-v2 加密录入，执行期才按租约解封给 Executor。</p>'+
+      '<button class="btn" style="margin-top:14px" id="bw-btn" onclick="buySubmit(\\''+esc(p.code)+'\\')">提交订单</button></div>'
+     :'<div class="card muted">未找到商品 '+esc(code||"")+'。'+(products.length?'可选：<a onclick="go(\\'home\\')" style="cursor:pointer">回首页</a>':'商品未上架。')+'</div>');
+}
+async function buySubmit(code){const btn=$("bw-btn");btn.disabled=true;
+  try{const acc=$("bw-acc").value.trim(),courses=$("bw-courses").value.trim(),path=$("bw-path").value;
+    const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"chaoxing",account:acc})});
+    let tmsg="";
+    if(courses){const t=await api("/api/v1/orders/"+o.order_id+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:"chaoxing.run",required_capabilities:["chaoxing"],payload:{courses:courses,speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
+    toast("订单已创建："+o.order_id.slice(0,8)+"。"+tmsg);go("order",o.order_id)}catch(e){toast("下单失败："+e.message);btn.disabled=false}}
 
-async function guestQuery(){const code=$('g-code').value.trim();if(!code)return toast('请输入订单号');
-  try{const b=await api('/api/v1/guest/query',{method:'POST',body:JSON.stringify({code})});
-  const list=b.orders||b.results||[];
-  $('g-res').innerHTML=list.length?list.map(o=>'<tr><td class="mono">'+(o.order_id_prefix||o.order_id||'')+'…</td><td>'+o.product_code+'</td><td>'+stLabel(o.status)+'</td><td class="muted">'+fmt(o.updated_at)+'</td></tr>').join('')
-    :'<tr><td colspan="4" class="muted">无匹配订单（仅返回前缀匹配的非敏感字段）</td></tr>'}catch(e){toast('查询失败：'+e.message)}}
+/* ---- 我的订单（按账号分组，仿本地） ---- */
+async function drawMy(){if(!me)return;
+  try{const b=await api("/api/v1/my/orders");const L=b.orders||[];
+  if(!L.length){$("myOrders").innerHTML="";$("emptyMy").innerHTML='<div class="empty"><div class="empty-header">📭</div><p class="empty-title">还没有订单</p><p class="empty-subtitle muted">选择一个商品，立即开始自动化</p><button class="btn" onclick="go(\\'home\\')">去下单</button></div>';return}
+  $("emptyMy").innerHTML="";
+  const groups={};L.forEach(o=>{(groups[o.account||"(未填账号)"]=groups[o.account||"(未填账号)"]||[]).push(o)});
+  let rows="";
+  for(const acc of Object.keys(groups)){const items=groups[acc];
+    const row=o=>'<tr><td class="mono muted">'+esc(o.order_id.slice(0,8))+'</td>'+
+      '<td>'+(PICON[o.platform]||"⚙")+' '+esc(o.product_code)+'</td>'+
+      '<td>'+esc(o.account||"—")+'</td><td>'+badge(o.status)+'</td>'+
+      '<td class="small text-secondary">'+fmt(o.created_at)+'<br>→ '+fmt(o.updated_at)+'</td>'+
+      '<td><button class="btn out sm" onclick="go(\\'order\\',\\''+o.order_id+'\\')">详情</button></td></tr>';
+    if(items.length===1)rows+=row(items[0]);
+    else{const doneN=items.filter(o=>["succeeded","done"].includes(o.status)).length;
+      rows+='<tr><td colspan="6" style="padding:0"><details class="acc"><summary><b>'+(PICON[items[0].platform]||"⚙")+' '+esc(acc)+
+        '</b> <span class="badge b-blue">'+items.length+' 单</span> <span class="badge b-green">'+doneN+' 完成</span>'+
+        '<span class="small muted" style="margin-left:8px">点击展开</span></summary>'+
+        '<div style="padding:0 6px 6px"><table>'+items.map(row).join("")+'</table></div></details></tr>'}}
+  $("myOrders").innerHTML=rows}catch(e){}}
+
+/* ---- 订单详情 ---- */
+async function drawOrder(id){currentOrder=id;
+  try{const b=await api("/api/v1/orders/"+id);const o=b.order||{};const at=b.attempts||[];
+  const canEnqueue=["pending","processing"].includes(o.status);
+  $("v-order").innerHTML='<h3 style="margin:20px 0 6px">📄 订单 <span class="mono">'+esc(o.order_id)+'</span> '+badge(o.status)+'</h3>'+
+   '<div class="card"><p class="small muted">商品 '+esc(o.product_code)+' ｜ 平台 '+esc(o.platform)+' ｜ 账号 '+esc(o.account||"(托管)")+
+   ' ｜ 创建 '+fmt(o.created_at)+' ｜ 更新 '+fmt(o.updated_at)+'</p>'+
+   '<h3 style="margin:14px 0 8px">执行记录</h3>'+
+   (at.length?'<table><thead><tr><th>#</th><th>状态</th><th>错误码</th><th>开始</th><th>结束</th></tr></thead><tbody>'+
+     at.map(a=>'<tr><td class="mono">'+a.attempt_no+'</td><td>'+badge(a.status)+'</td><td class="mono">'+esc(a.error_code||"—")+
+     '</td><td class="small text-secondary">'+fmt(a.started_at)+'</td><td class="small text-secondary">'+fmt(a.finished_at)+'</td></tr>').join("")+'</tbody></table>'
+    :'<p class="muted">暂无执行记录</p>')+
+   (canEnqueue?'<details style="margin-top:12px" open><summary style="cursor:pointer;color:#22d3ee">➕ 入队任务</summary>'+
+     '<label>任务类型</label><select id="t-type"><option value="chaoxing.run">chaoxing.run（超星刷课）</option><option value="demo.echo">demo.echo（连通性测试）</option></select>'+
+     '<label>执行路径</label><select id="t-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>'+
+     '<label>Payload（JSON）</label><textarea id="t-payload" rows="4" class="mono">{"courses":"254722149","speed":2.0,"timeout_seconds":1800}</textarea>'+
+     '<button class="btn" style="margin-top:12px" onclick="enqueue()">入队</button></details>'
+    :'<p class="small muted" style="margin-top:12px">订单已终态（不可再入队）。</p>')+
+   '<div style="margin-top:16px"><button class="btn out sm" onclick="go(\\'my\\')">← 返回我的订单</button></div></div>';
+  }catch(e){$("v-order").innerHTML='<div class="card muted" style="margin-top:20px">加载失败：'+esc(e.message)+'</div>'}}
+async function enqueue(){try{let payload;try{payload=JSON.parse($("t-payload").value)}catch(e){throw new Error("payload 不是合法 JSON")}
+  const b=await api("/api/v1/orders/"+currentOrder+"/tasks",{method:"POST",body:JSON.stringify({execution_path:$("t-path").value,task_type:$("t-type").value,required_capabilities:[$("t-type").value.split(".")[0]],payload})});
+  toast("任务已入队："+b.task_id.slice(0,8));drawOrder(currentOrder)}catch(e){toast("入队失败："+e.message)}}
+
+/* ---- 查单 ---- */
+async function guestQuery(){const code=$("g-code").value.trim();if(!code)return toast("请输入订单号");
+  try{const b=await api("/api/v1/guest/query",{method:"POST",body:JSON.stringify({code})});const L=b.orders||[];
+  $("g-res").innerHTML=L.length?L.map(o=>'<tr><td class="mono">'+esc(o.order_id_prefix||"")+'…</td><td>'+esc(o.product_code)+'</td><td>'+badge(o.status)+'</td><td class="small text-secondary">'+fmt(o.updated_at)+'</td></tr>').join("")
+    :'<tr><td colspan="4" class="muted">无匹配订单</td></tr>'}catch(e){toast("查询失败："+e.message)}}
+
+/* ---- 批量下单 ---- */
+async function batchSubmit(){const btn=$("b-btn");btn.disabled=true;const out=$("b-out");out.style.display="";out.textContent="";
+  const lines=$("b-lines").value.trim().split("\\n").filter(x=>x.trim());let okN=0;
+  for(const ln of lines){const parts=ln.split(",").map(x=>(x||"").trim());const plat=parts[0],acc=parts[1],courses=parts[2];
+    if(!plat||!acc){out.textContent+="跳过（格式：平台,账号,课程ID）："+ln+"\\n";continue}
+    try{const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:"E2E",platform:plat.toLowerCase(),account:acc})});
+      if(courses){await api("/api/v1/orders/"+o.order_id+"/tasks",{method:"POST",body:JSON.stringify({execution_path:$("b-path").value,task_type:"chaoxing.run",required_capabilities:["chaoxing"],payload:{courses:courses,speed:2.0,timeout_seconds:1800}})})}
+      okN++;out.textContent+="OK "+acc+" -> "+o.order_id+"\\n"}
+    catch(e){out.textContent+="FAIL "+acc+"："+e.message+"\\n"}}
+  out.textContent+="\\n已受理 "+okN+"/"+lines.length+" 单";toast("批量提交完成："+okN+" 单");btn.disabled=false}
 
 boot();
 </script>
-</body>
-</html>`;
+</body></html>`;
