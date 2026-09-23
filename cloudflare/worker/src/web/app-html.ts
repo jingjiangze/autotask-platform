@@ -180,13 +180,14 @@ async function boot(){try{const b=await api("/api/v1/me");me=b.user}catch(e){me=
 
 /* ---- 首页橱窗 ---- */
 async function drawHome(){
-  $("productCards").innerHTML=products.length?products.map(p=>
-    '<div class="card col glow" style="min-height:190px;display:flex;flex-direction:column">'+
+  $("productCards").innerHTML=products.length?products.map(p=>{
+    let price="";try{price=(JSON.parse(p.config_json||"{}").price)||""}catch(e){}
+    return '<div class="card col glow" style="min-height:190px;display:flex;flex-direction:column">'+
     '<div class="avatar">'+(PICON[p.platform]||"⚙")+'</div><h3>'+esc(p.name)+'</h3>'+
     '<p class="text-secondary small" style="flex:1">'+esc(p.description||"")+'</p>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">'+
-    '<span class="badge b-green">'+esc(p.platform)+'</span>'+
-    '<button class="btn sm" onclick="go(\\'buy\\',\\''+esc(p.code)+'\\')">立即下单</button></div></div>').join("")
+    '<span class="badge b-green">'+esc(price||p.platform)+'</span>'+
+    '<button class="btn sm" onclick="go(\\'buy\\',\\''+esc(p.code)+'\\')">立即下单</button></div></div>'}).join("")
     :'<div class="card col muted">暂无在售商品（管理端自助上架未开放）</div>';
   if(me){try{const b=await api("/api/v1/my/orders");const L=b.orders||[];
     const nAll=L.length,nDone=L.filter(o=>["succeeded","done"].includes(o.status)).length,
@@ -226,12 +227,15 @@ function drawBuy(code){
 async function queryCourses(code){
   const acc=$("bw-acc").value.trim(),pass=$("bw-pass").value,path=$("bw-path").value;
   if(!acc||!pass)return toast("请先填写账号和密码");
+  const p=products.find(x=>x.code===code)||{};
+  const plat=p.platform||"chaoxing";
+  if(plat==="zhsqr")return toast("扫码刷取为本地交互流程，云端暂不支持，请选择视频刷取商品");
   const stat=$("bw-qstat");stat.textContent="创建订单并入队查询…";
   try{
     // 先建订单（幂等键），凭据 enc-v2 随查课请求加密入库
-    const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"chaoxing",account:acc})});
+    const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:plat,account:acc})});
     stat.textContent="任务已入队，本机 Executor 真实登录查询中（约 30-90 秒）…";
-    const q=await api("/api/v1/orders/"+o.order_id+"/query-courses",{method:"POST",body:JSON.stringify({account:acc,password:pass,platform:"chaoxing",execution_path:path})});
+    const q=await api("/api/v1/orders/"+o.order_id+"/query-courses",{method:"POST",body:JSON.stringify({account:acc,password:pass,platform:plat,execution_path:path})});
     // 轮询任务直至终态
     let task=null;
     for(let i=0;i<60;i++){await new Promise(r=>setTimeout(r,3000));
@@ -257,14 +261,17 @@ async function queryCourses(code){
 async function buySubmit(code){
   const acc=$("bw-acc").value.trim(),path=$("bw-path").value;
   if(!acc)return toast("请填写账号");
+  const p=products.find(x=>x.code===code)||{};
+  const plat=p.platform||"chaoxing";
+  if(plat==="zhsqr")return toast("扫码刷取为本地交互流程，云端暂不支持");
   const btn=$("bw-btn");btn.disabled=true;
   try{
     let oid=window._buyOrder;
-    if(!oid){const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"chaoxing",account:acc})});oid=o.order_id}
-    // 收集勾选课程 → 入队 chaoxing.run
+    if(!oid){const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:plat,account:acc})});oid=o.order_id}
+    // 收集勾选课程 → 入队 <platform>.run
     const sel=[...document.querySelectorAll(".bw-c:checked")].map(x=>x.value);
     let tmsg="（未选课程，稍后可从详情页入队）";
-    if(sel.length){const t=await api("/api/v1/orders/"+oid+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:"chaoxing.run",required_capabilities:["chaoxing"],payload:{courses:sel.join(","),speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
+    if(sel.length){const t=await api("/api/v1/orders/"+oid+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:plat+".run",required_capabilities:[plat],payload:{courses:sel.join(","),speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
     window._buyOrder=null;buyCourses=[];
     toast("订单 "+oid.slice(0,8)+" 已提交。"+tmsg);go("order",oid);
   }catch(e){toast("下单失败："+e.message);btn.disabled=false}}

@@ -310,8 +310,11 @@ def main() -> int:  # pragma: no cover - 常驻入口
     runner = args.runner or os.environ.get("TASK_RUNNER", "demo")
     if runner == "chaoxing":
         from runner_chaoxing import run_chaoxing, query_courses, cleanup_task_dir
+        from runner_zhs import run_zhs, query_courses as zhs_query
         runtime.register_handler("chaoxing.run", run_chaoxing)
         runtime.register_handler("chaoxing.courses", query_courses)
+        runtime.register_handler("zhs.run", run_zhs)
+        runtime.register_handler("zhs.courses", zhs_query)
         runtime._cleanup = cleanup_task_dir  # 任务结束清理隔离目录（§110）
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
