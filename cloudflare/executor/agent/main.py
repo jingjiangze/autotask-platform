@@ -89,7 +89,10 @@ class ExecutorRuntime:
             if not task:
                 time.sleep(self.poll_interval)
                 continue
-            self._execute(task)
+            try:
+                self._execute(task)
+            except OSError as e:  # 传输层抖动穿透（如 complete 兜底再失败）：不杀主循环
+                print(f"[warn] execute transport error: {e}", flush=True)
             done += 1
         return done
 
@@ -180,7 +183,10 @@ def main() -> int:  # pragma: no cover - 常驻入口
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
 
-    client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
+    try:
+        client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
+    except OSError:
+        pass  # 瞬时网络抖动不影响常驻循环
     runtime.run_forever()
     return 0
 
