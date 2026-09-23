@@ -201,28 +201,73 @@ async function doRegister(){try{await api("/api/v1/auth/register",{method:"POST"
 async function doLogin(silent){try{await api("/api/v1/auth/login",{method:"POST",body:JSON.stringify({username:$("lg-user").value.trim(),password:$("lg-pass").value})});await boot();go("my");if(!silent)toast("登录成功")}catch(e){if(!silent)toast("登录失败："+e.message)}}
 async function logout(){try{await api("/api/v1/auth/logout",{method:"POST"})}catch(e){}me=null;go("home");boot()}
 
-/* ---- 下单向导（简化三步：课程查询为本地进程内工具，云端课程号手动填写） ---- */
+/* ---- 下单向导（三步：商品 → 账号密码+查课选课 → 提交；课表经本机 Executor 真实查询） ---- */
+let buyCourses = []; // 查课结果缓存 [{id,name}]
+
 function drawBuy(code){
   const p=products.find(x=>x.code===code);
+  buyCourses=[];
   $("v-buy").innerHTML='<h3 style="margin:20px 0 6px"><span class="wiz-num on">1</span>确认商品'+
-    '<span class="wiz-num" style="margin-left:16px">2</span>填写账号与课程'+
+    '<span class="wiz-num" style="margin-left:16px">2</span>账号密码 & 查课选课'+
     '<span class="wiz-num" style="margin-left:16px">3</span>提交</h3>'+
     (p?'<div class="card"><div class="avatar">'+(PICON[p.platform]||"⚙")+'</div><h3>'+esc(p.name)+'</h3>'+
       '<p class="text-secondary small">'+esc(p.description||"")+'</p>'+
       '<label>网课账号（手机号/学号）</label><input id="bw-acc" placeholder="13800000000">'+
-      '<label>课程 ID（超星课程数字串，可多个逗号分隔；留空则创建订单后从详情页入队）</label>'+
-      '<input id="bw-courses" class="mono" placeholder="254722149">'+
+      '<label>密码（enc-v2 加密托管，执行期才按租约解封）</label><input id="bw-pass" type="password">'+
+      '<div style="display:flex;gap:10px;margin-top:12px;align-items:center">'+
+        '<button class="btn out" id="bw-qbtn" onclick="queryCourses(\\''+esc(p.code)+'\\')">🔍 查询课表（本机真实登录）</button>'+
+        '<span class="small muted" id="bw-qstat"></span></div>'+
+      '<div id="bw-courses"></div>'+
       '<label>执行路径</label><select id="bw-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>'+
-      '<p class="small muted" style="margin-top:10px">🔐 账号密码不在网页明文收集：凭据由管理端 enc-v2 加密录入，执行期才按租约解封给 Executor。</p>'+
       '<button class="btn" style="margin-top:14px" id="bw-btn" onclick="buySubmit(\\''+esc(p.code)+'\\')">提交订单</button></div>'
      :'<div class="card muted">未找到商品 '+esc(code||"")+'。'+(products.length?'可选：<a onclick="go(\\'home\\')" style="cursor:pointer">回首页</a>':'商品未上架。')+'</div>');
 }
-async function buySubmit(code){const btn=$("bw-btn");btn.disabled=true;
-  try{const acc=$("bw-acc").value.trim(),courses=$("bw-courses").value.trim(),path=$("bw-path").value;
+
+async function queryCourses(code){
+  const acc=$("bw-acc").value.trim(),pass=$("bw-pass").value,path=$("bw-path").value;
+  if(!acc||!pass)return toast("请先填写账号和密码");
+  const stat=$("bw-qstat");stat.textContent="创建订单并入队查询…";
+  try{
+    // 先建订单（幂等键），凭据 enc-v2 随查课请求加密入库
     const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"chaoxing",account:acc})});
-    let tmsg="";
-    if(courses){const t=await api("/api/v1/orders/"+o.order_id+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:"chaoxing.run",required_capabilities:["chaoxing"],payload:{courses:courses,speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
-    toast("订单已创建："+o.order_id.slice(0,8)+"。"+tmsg);go("order",o.order_id)}catch(e){toast("下单失败："+e.message);btn.disabled=false}}
+    stat.textContent="任务已入队，本机 Executor 真实登录查询中（约 30-90 秒）…";
+    const q=await api("/api/v1/orders/"+o.order_id+"/query-courses",{method:"POST",body:JSON.stringify({account:acc,password:pass,platform:"chaoxing",execution_path:path})});
+    // 轮询任务直至终态
+    let task=null;
+    for(let i=0;i<60;i++){await new Promise(r=>setTimeout(r,3000));
+      const d=await api("/api/v1/tasks/"+q.task_id);task=d.task;
+      if(["succeeded","failed","canceled"].includes(task.status))break;}
+    if(!task||task.status!=="succeeded"){stat.textContent="查询失败："+(task&&task.error_code||"超时/引擎未在线");return}
+    // 取 result_json 工件
+    const d2=await api("/api/v1/tasks/"+q.task_id);
+    const art=(d2.artifacts||[]).find(a=>a.artifact_type==="result_json");
+    if(!art){stat.textContent="查询完成但无课程结果";return}
+    const r=await fetch("/api/v1/orders/"+o.order_id+"/artifacts/"+art.id);
+    const res=await r.json();
+    buyCourses=(res&&res.courses)||[];
+    window._buyOrder=o.order_id;window._buyAcc=acc;
+    stat.textContent="查询到 "+buyCourses.length+" 门课程（订单 "+o.order_id.slice(0,8)+" 已创建，勾选后提交即入队）";
+    $("bw-courses").innerHTML=buyCourses.length?'<label>勾选要刷的课程</label><div class="card sm" style="max-height:280px;overflow:auto">'+
+      buyCourses.map((c,i)=>'<div style="padding:4px 2px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--tx)">'+
+      '<input type="checkbox" class="bw-c" style="width:auto" value="'+esc(String(c.id??c.course_id??c))+'"'+(i===0?" checked":"")+'> '+esc(c.name??c.title??String(c))+'</label></div>').join("")+'</div>'
+      :'<p class="small muted">课程列表为空（可能全部已完成）</p>';
+  }catch(e){stat.textContent="查询失败："+e.message}
+}
+
+async function buySubmit(code){
+  const acc=$("bw-acc").value.trim(),path=$("bw-path").value;
+  if(!acc)return toast("请填写账号");
+  const btn=$("bw-btn");btn.disabled=true;
+  try{
+    let oid=window._buyOrder;
+    if(!oid){const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"chaoxing",account:acc})});oid=o.order_id}
+    // 收集勾选课程 → 入队 chaoxing.run
+    const sel=[...document.querySelectorAll(".bw-c:checked")].map(x=>x.value);
+    let tmsg="（未选课程，稍后可从详情页入队）";
+    if(sel.length){const t=await api("/api/v1/orders/"+oid+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:"chaoxing.run",required_capabilities:["chaoxing"],payload:{courses:sel.join(","),speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
+    window._buyOrder=null;buyCourses=[];
+    toast("订单 "+oid.slice(0,8)+" 已提交。"+tmsg);go("order",oid);
+  }catch(e){toast("下单失败："+e.message);btn.disabled=false}}
 
 /* ---- 我的订单（按账号分组，仿本地） ---- */
 async function drawMy(){if(!me)return;
@@ -245,26 +290,69 @@ async function drawMy(){if(!me)return;
         '<div style="padding:0 6px 6px"><table>'+items.map(row).join("")+'</table></div></details></tr>'}}
   $("myOrders").innerHTML=rows}catch(e){}}
 
-/* ---- 订单详情 ---- */
+/* ---- 订单详情（含 stage-cloud-28 控制：暂停/恢复/优先级 + 凭据明文 + 工件下载） ---- */
 async function drawOrder(id){currentOrder=id;
   try{const b=await api("/api/v1/orders/"+id);const o=b.order||{};const at=b.attempts||[];
-  const canEnqueue=["pending","processing"].includes(o.status);
-  $("v-order").innerHTML='<h3 style="margin:20px 0 6px">📄 订单 <span class="mono">'+esc(o.order_id)+'</span> '+badge(o.status)+'</h3>'+
-   '<div class="card"><p class="small muted">商品 '+esc(o.product_code)+' ｜ 平台 '+esc(o.platform)+' ｜ 账号 '+esc(o.account||"(托管)")+
-   ' ｜ 创建 '+fmt(o.created_at)+' ｜ 更新 '+fmt(o.updated_at)+'</p>'+
-   '<h3 style="margin:14px 0 8px">执行记录</h3>'+
+  const running=["processing","pending"].includes(o.status);
+  const paused=o.control==="paused";
+  let html='<h3 style="margin:20px 0 6px">📄 订单 <span class="mono">'+esc(o.order_id)+'</span> '+badge(o.status)+
+    (paused?' <span class="badge b-orange">已暂停</span>':'')+
+    (o.priority>0?' <span class="badge b-blue">优先级 '+o.priority+'</span>':'')+'</h3>';
+  html+='<div class="card"><p class="small muted">商品 '+esc(o.product_code)+' ｜ 平台 '+esc(o.platform)+' ｜ 账号 '+esc(o.account||"(托管)")+
+   ' ｜ 创建 '+fmt(o.created_at)+' ｜ 更新 '+fmt(o.updated_at)+'</p>';
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">';
+  if(running)html+=paused
+    ?'<button class="btn sm" onclick="ctlOrder(\\'resume\\')">▶ 恢复执行</button>'
+    :'<button class="btn out sm" onclick="ctlOrder(\\'pause\\')">⏸ 暂停（挂起引擎进程，进度保留）</button>';
+  if(running)html+='<button class="btn out sm" onclick="ctlOrder(\\'priority\\',9)">⏫ 插队（优先级 9）</button>';
+  html+='<button class="btn out sm" onclick="showCred()">🔐 查看 / 显示凭据明文（仅本人）</button>';
+  html+='</div><p class="small muted" id="credBox" style="margin-top:8px"></p>';
+  html+='<h3 style="margin:14px 0 8px">执行记录</h3>'+
    (at.length?'<table><thead><tr><th>#</th><th>状态</th><th>错误码</th><th>开始</th><th>结束</th></tr></thead><tbody>'+
      at.map(a=>'<tr><td class="mono">'+a.attempt_no+'</td><td>'+badge(a.status)+'</td><td class="mono">'+esc(a.error_code||"—")+
      '</td><td class="small text-secondary">'+fmt(a.started_at)+'</td><td class="small text-secondary">'+fmt(a.finished_at)+'</td></tr>').join("")+'</tbody></table>'
-    :'<p class="muted">暂无执行记录</p>')+
-   (canEnqueue?'<details style="margin-top:12px" open><summary style="cursor:pointer;color:#22d3ee">➕ 入队任务</summary>'+
+    :'<p class="muted">暂无执行记录</p>');
+  html+='<div id="artBox"></div>';
+  html+=(running?'<details style="margin-top:12px" open><summary style="cursor:pointer;color:#22d3ee">➕ 入队任务</summary>'+
      '<label>任务类型</label><select id="t-type"><option value="chaoxing.run">chaoxing.run（超星刷课）</option><option value="demo.echo">demo.echo（连通性测试）</option></select>'+
      '<label>执行路径</label><select id="t-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>'+
      '<label>Payload（JSON）</label><textarea id="t-payload" rows="4" class="mono">{"courses":"254722149","speed":2.0,"timeout_seconds":1800}</textarea>'+
      '<button class="btn" style="margin-top:12px" onclick="enqueue()">入队</button></details>'
     :'<p class="small muted" style="margin-top:12px">订单已终态（不可再入队）。</p>')+
    '<div style="margin-top:16px"><button class="btn out sm" onclick="go(\\'my\\')">← 返回我的订单</button></div></div>';
+  $("v-order").innerHTML=html;
+  loadArtifacts(id);
   }catch(e){$("v-order").innerHTML='<div class="card muted" style="margin-top:20px">加载失败：'+esc(e.message)+'</div>'}}
+
+async function ctlOrder(action,priority){
+  try{const body=priority?{action,priority}:{action};
+    const b=await api("/api/v1/orders/"+currentOrder+"/control",{method:"POST",body:JSON.stringify(body)});
+    toast(action==="pause"?"已暂停（引擎进程挂起中）":action==="resume"?"已恢复执行":"优先级已更新（排队任务热生效）");
+    drawOrder(currentOrder)}catch(e){toast("操作失败："+e.message)}}
+
+async function showCred(){
+  try{const c=await api("/api/v1/orders/"+currentOrder+"/credentials");
+    $("credBox").innerHTML='账号 <span class="mono">'+esc(c.account||"—")+'</span> ｜ 密码 <span class="mono">'+esc(c.password||"—（未托管）")+'</span>'+
+      ' <span class="small muted">（CREDENTIAL_VIEWED 已审计；仅在您本人查看时解密）</span>'}
+  catch(e){$("credBox").textContent="凭据查看失败："+e.message}}
+
+async function loadArtifacts(oid){
+  try{
+    const b=await api("/api/v1/orders/"+oid);
+    const at=b.attempts||[];if(!at.length)return;
+    const tids=[...new Set(at.map(a=>String(a.id||"").split("#")[0]).filter(Boolean))];
+    let html="";
+    for(const tid of tids){
+      const d=await api("/api/v1/tasks/"+tid);
+      const arts=(d.artifacts||[]).filter(a=>a.artifact_type==="stdout"||a.artifact_type==="result_json");
+      if(!arts.length)continue;
+      html+='<h3 style="margin:14px 0 8px">日志 / 结果工件</h3><table><thead><tr><th>类型</th><th>大小</th><th>时间</th><th></th></tr></thead><tbody>'+
+        arts.map(a=>'<tr><td class="mono">'+esc(a.artifact_type)+'</td><td class="small text-secondary">'+(a.size_bytes||0)+' B</td>'+
+        '<td class="small text-secondary">'+fmt(a.created_at)+'</td>'+
+        '<td><a class="btn out sm" style="text-decoration:none" href="/api/v1/orders/'+oid+'/artifacts/'+a.id+'" target="_blank">下载</a></td></tr>').join("")+'</tbody></table>';
+    }
+    const box=$("artBox");if(box)box.innerHTML=html;
+  }catch(e){}}
 async function enqueue(){try{let payload;try{payload=JSON.parse($("t-payload").value)}catch(e){throw new Error("payload 不是合法 JSON")}
   const b=await api("/api/v1/orders/"+currentOrder+"/tasks",{method:"POST",body:JSON.stringify({execution_path:$("t-path").value,task_type:$("t-type").value,required_capabilities:[$("t-type").value.split(".")[0]],payload})});
   toast("任务已入队："+b.task_id.slice(0,8));drawOrder(currentOrder)}catch(e){toast("入队失败："+e.message)}}

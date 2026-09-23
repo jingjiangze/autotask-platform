@@ -160,11 +160,12 @@ Handler = Callable[[dict[str, Any], "TaskContext"], dict[str, Any]]
 
 @dataclass
 class TaskContext:
-    """handler 可用的运行时上下文：凭据解封与工件上传。"""
+    """handler 可用的运行时上下文：凭据解封、工件上传、引擎进程控制。"""
     client: CentralClient
     task_id: str
     lease_id: str
     _credentials: list[dict[str, str]] | None = field(default=None, repr=False)
+    proc: Any = field(default=None, repr=False)  # stage-cloud-28：当前引擎子进程（挂起/恢复用）
 
     def credentials(self) -> list[dict[str, str]]:
         """按需解封凭据（每任务最多一次，缓存于内存，进程结束即丢）。"""
@@ -175,6 +176,29 @@ class TaskContext:
     def upload(self, content: bytes, artifact_type: str = "stdout") -> dict[str, Any]:
         return self.client.upload_artifact(self.task_id, self.lease_id, content,
                                            artifact_type=artifact_type)
+
+    # stage-cloud-28：进程树挂起/恢复（Windows NtSuspend/NtResume 语义，psutil 跨平台封装）
+    def suspend_engine(self) -> bool:
+        return self._control_engine(suspend=True)
+
+    def resume_engine(self) -> bool:
+        return self._control_engine(suspend=False)
+
+    def _control_engine(self, suspend: bool) -> bool:
+        if self.proc is None or self.proc.poll() is not None:
+            return False
+        try:
+            import psutil
+            parent = psutil.Process(self.proc.pid)
+            targets = [parent] + parent.children(recursive=True)
+            for p in targets:
+                try:
+                    p.suspend() if suspend else p.resume()
+                except psutil.NoSuchProcess:
+                    continue
+            return True
+        except Exception:
+            return False
 
 
 class ExecutorRuntime:
@@ -212,11 +236,20 @@ class ExecutorRuntime:
         task_id = task["task_id"]
         lease_id = task["lease_id"]
         stop_heartbeat = threading.Event()
+        ctx = TaskContext(self.client, task_id, lease_id)
+        last_control = "resume"  # 幂等：只在信令变化时切换进程状态
 
         def hb() -> None:
+            nonlocal last_control
             while not stop_heartbeat.wait(self.heartbeat_interval):
                 try:
-                    self.client.heartbeat(task_id, lease_id)
+                    resp = self.client.heartbeat(task_id, lease_id)
+                    # stage-cloud-28：控制信令（pause/resume）随心跳下发
+                    control = resp.get("control") if isinstance(resp, dict) else None
+                    if control in ("pause", "resume") and control != last_control:
+                        ok = ctx.suspend_engine() if control == "pause" else ctx.resume_engine()
+                        print(f"[control] {control} engine -> {'ok' if ok else 'no proc'}", flush=True)
+                        last_control = control
                 except Exception:
                     pass  # 心跳失败不中断执行；租约到期由云端回收
 
@@ -227,7 +260,6 @@ class ExecutorRuntime:
             if handler is None:
                 self.client.complete(task_id, lease_id, "failed", "TASK_INVALID")
                 return
-            ctx = TaskContext(self.client, task_id, lease_id)
             self.client.ack(task_id, lease_id)
             try:
                 result = handler(task["payload"], ctx)
@@ -270,12 +302,16 @@ def main() -> int:  # pragma: no cover - 常驻入口
         print("CENTRAL_URL / EXECUTOR_ID / EXECUTOR_TOKEN must be set", flush=True)
         return 2
     client = CentralClient(cfg_url, cfg_id, cfg_path, token=cfg_token)
-    runtime = ExecutorRuntime(client, capabilities=cfg_caps)
+    runtime = ExecutorRuntime(
+        client, capabilities=cfg_caps,
+        poll_interval=float(os.environ.get("POLL_INTERVAL_S", "15")),
+        heartbeat_interval=float(os.environ.get("HEARTBEAT_INTERVAL_S", "30")))
 
     runner = args.runner or os.environ.get("TASK_RUNNER", "demo")
     if runner == "chaoxing":
-        from runner_chaoxing import run_chaoxing, cleanup_task_dir
+        from runner_chaoxing import run_chaoxing, query_courses, cleanup_task_dir
         runtime.register_handler("chaoxing.run", run_chaoxing)
+        runtime.register_handler("chaoxing.courses", query_courses)
         runtime._cleanup = cleanup_task_dir  # 任务结束清理隔离目录（§110）
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})

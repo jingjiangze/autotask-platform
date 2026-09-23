@@ -22,9 +22,17 @@ export const TABLES = [
   "idempotency_keys",
 ];
 
-/** 幂等应用全部迁移（IF NOT EXISTS 语句，可安全重放）。 */
+/** 幂等应用全部迁移（IF NOT EXISTS 语句可安全重放；ALTER ADD COLUMN 重放忽略 duplicate column）。 */
 export async function applyMigrations(): Promise<void> {
   expect(MIGRATIONS.length).toBeGreaterThanOrEqual(2);
-  const stmts = MIGRATIONS.flatMap((m) => m.queries.map((q) => DB.prepare(q)));
-  await DB.batch(stmts);
+  for (const m of MIGRATIONS) {
+    for (const q of m.queries) {
+      try {
+        await DB.prepare(q).run();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("duplicate column name")) throw e;
+      }
+    }
+  }
 }

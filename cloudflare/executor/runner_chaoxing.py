@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
@@ -92,12 +93,15 @@ def run_chaoxing(payload: dict[str, Any], ctx) -> dict[str, Any]:
     started = time.time()
     with open(log_path, "ab") as logf:
         proc = subprocess.Popen(cmd, env=env, cwd=work, stdout=logf, stderr=subprocess.STDOUT)
+        ctx.proc = proc  # stage-cloud-28：暴露给心跳控制（挂起/恢复）
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=15)
             rc = -9
+        finally:
+            ctx.proc = None
     elapsed = round(time.time() - started, 1)
 
     result: dict[str, Any] = {"exit_code": rc, "courses": courses, "elapsed_s": elapsed}
@@ -105,4 +109,71 @@ def run_chaoxing(payload: dict[str, Any], ctx) -> dict[str, Any]:
     if os.path.isfile(log_path):
         with open(log_path, "rb") as f:
             ctx.upload(f.read(), artifact_type="stdout")
+    return result
+
+
+# stage-cloud-28 — 查课表：复用本地 tools_query_courses.py（WK_ACCOUNT/WK_PASSWORD env 契约同 order_platform）
+QUERY_TOOL = r"D:\web\tools_query_courses.py"
+
+
+def query_courses(payload: dict[str, Any], ctx) -> dict[str, Any]:
+    """真实查询课程列表：登录 → 拉课程树 → JSON。结果经 result_json 返回前端。"""
+    platform = str(payload.get("platform") or "chaoxing")
+    timeout = int(payload.get("timeout_seconds") or 180)
+
+    creds = ctx.credentials()
+    account = next((c["plaintext"] for c in creds if c["credential_type"] == "account"), "")
+    password = next((c["plaintext"] for c in creds if c["credential_type"] == "account_password"), "")
+    if not account or not password:
+        raise RuntimeError("credentials missing (need account + account_password)")
+
+    env, work, log_path = build_chaoxing_env(ctx.task_id, account, password)
+    cookie_path = os.path.join(work, f"query_{ctx.task_id[:8]}.json")
+    if platform == "chaoxing":
+        args = [QUERY_TOOL, "chaoxing", "", "", cookie_path]
+    elif platform == "zhs":
+        args = [QUERY_TOOL, "zhs", "", "", cookie_path]
+    else:
+        args = [QUERY_TOOL, "zhs_cookie", cookie_path]
+
+    started = time.time()
+    proc = subprocess.Popen([PYEXE, *args], env=env, cwd=work,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace")
+    ctx.proc = proc
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+        rc = proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate(timeout=15)
+        rc = -9
+        stdout = ""
+    finally:
+        ctx.proc = None
+    elapsed = round(time.time() - started, 1)
+
+    # 引擎契约：stdout 最后一行是 JSON（{ok, courses|error}）
+    data: dict[str, Any] = {}
+    for line in reversed((stdout or "").strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                data = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    result: dict[str, Any] = {
+        "ok": bool(data.get("ok")),
+        "platform": platform,
+        "courses": data.get("courses", []) if data.get("ok") else [],
+        "error": data.get("error") if not data.get("ok") else None,
+        "exit_code": rc,
+        "elapsed_s": elapsed,
+    }
+    if os.path.isfile(log_path):
+        with open(log_path, "rb") as f:
+            ctx.upload(f.read(), artifact_type="stdout")
+    if not result["ok"] and not result["error"]:
+        result["error"] = f"query failed (exit={rc})"
     return result

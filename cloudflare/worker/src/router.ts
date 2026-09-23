@@ -31,6 +31,7 @@ import {
   taskDetail,
 } from "./orders/order-service";
 import { downloadArtifact, uploadArtifact } from "./artifacts/artifact-service";
+import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };
 export type { ErrorCode };
@@ -116,6 +117,23 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     const oid = pathname.slice("/api/v1/orders/".length, -"/tasks".length);
     if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return createOrderTask(env, request, oid);
+  }
+  // stage-cloud-28：订单控制 / 凭据明文查看 / 查课表
+  const orderSub = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)\/(control|credentials|query-courses)$/.exec(
+    pathname,
+  );
+  if (orderSub) {
+    const oid = orderSub[1]!;
+    if (orderSub[2] === "control") {
+      if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+      return orderControl(env, request, oid);
+    }
+    if (orderSub[2] === "credentials") {
+      if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+      return orderCredentialsView(env, request, oid);
+    }
+    if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return orderQueryCourses(env, request, oid);
   }
   const taskMatch = /^\/api\/v1\/tasks\/([A-Za-z0-9_-]+)$/.exec(pathname);
   if (taskMatch) {

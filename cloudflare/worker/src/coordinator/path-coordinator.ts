@@ -41,6 +41,7 @@ interface QueueTask {
   retry_at: number | null;
   enqueued_at: number;
   updated_at: number;
+  priority: number; // stage-cloud-28：越大越先出队（同级仍 FIFO）
 }
 
 type CoordMessage =
@@ -53,6 +54,13 @@ type CoordMessage =
       payload: Record<string, unknown>;
       trace_id?: string;
       max_attempts?: number;
+      priority?: number;
+    }
+  | {
+      // stage-cloud-28：订单级控制——排队任务的优先级热更新（暂停/恢复走 D1 control + 心跳下发）
+      type: "control";
+      order_id: string;
+      priority?: number;
     }
   | {
       type: "claim";
@@ -70,6 +78,7 @@ type CoordMessage =
       error_code?: string;
     }
   | { type: "requeue"; task_id: string }
+  | { type: "cancel"; task_id: string }
   | { type: "verify-lease"; task_id: string; lease_id: string }
   | { type: "stats" };
 
@@ -127,6 +136,8 @@ export class PathCoordinator implements DurableObject {
     switch (msg.type) {
       case "enqueue":
         return this.enqueue(msg);
+      case "control":
+        return this.control(msg);
       case "claim":
         return this.claim(msg);
       case "ack":
@@ -137,6 +148,18 @@ export class PathCoordinator implements DurableObject {
         return this.complete(msg);
       case "requeue":
         return this.requeue(msg.task_id, Date.now());
+      case "cancel": {
+        // stage-cloud-28：取消 DO 侧任务（仅 queued/leased 且租约过期可取消；运行中由租约到期自然回收）
+        const t = await this.getTask(msg.task_id);
+        if (!t) return fail("TASK_INVALID", "unknown task");
+        if (t.status === "queued" || (t.status === "leased" && (t.lease_expires_at ?? 0) < Date.now())) {
+          t.status = "canceled";
+          t.updated_at = Date.now();
+          await this.putTask(t);
+          return Response.json({ ok: true, status: "canceled" });
+        }
+        return fail("INVALID_TRANSITION", `cannot cancel in ${t.status}`);
+      }
       case "verify-lease":
         return this.verifyLease(msg.task_id, msg.lease_id);
       case "stats":
@@ -181,9 +204,28 @@ export class PathCoordinator implements DurableObject {
       retry_at: null,
       enqueued_at: now,
       updated_at: now,
+      priority: typeof msg.priority === "number" ? msg.priority : 0,
     };
     await this.putTask(task);
     return Response.json({ ok: true, task_id: task.task_id, status: "queued" }, { status: 201 });
+  }
+
+  // stage-cloud-28：排队任务优先级热更新（仅 queued 生效；运行中任务不受影响）
+  private async control(
+    msg: Extract<CoordMessage, { type: "control" }>,
+  ): Promise<Response> {
+    const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
+    let updated = 0;
+    for (const t of entries.values()) {
+      if (t.order_id !== msg.order_id || t.status !== "queued") continue;
+      if (typeof msg.priority === "number") {
+        t.priority = msg.priority;
+        t.updated_at = Date.now();
+        await this.putTask(t);
+        updated += 1;
+      }
+    }
+    return Response.json({ ok: true, updated });
   }
 
   private async claim(
@@ -192,8 +234,10 @@ export class PathCoordinator implements DurableObject {
     const now = Date.now();
     const caps = new Set(msg.capabilities ?? []);
     const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
-    // FIFO：按 enqueued_at 排序；能力不匹配的跳过（不阻塞后面任务）
-    const candidates = [...entries.values()].sort((a, b) => a.enqueued_at - b.enqueued_at);
+    // 出队：priority 降序优先，同级按 enqueued_at FIFO；能力不匹配的跳过（不阻塞后面任务）
+    const candidates = [...entries.values()].sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.enqueued_at - b.enqueued_at,
+    );
     for (const t of candidates) {
       if (t.status !== "queued") continue;
       if (!t.required_capabilities.every((c) => caps.has(c))) continue;

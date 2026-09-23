@@ -45,9 +45,9 @@ async function mirrorTaskState(
   errorCode?: string,
 ): Promise<void> {
   const now = Date.now();
-  const task = await env.DB.prepare("SELECT attempt_no, order_id FROM tasks WHERE id=?")
+  const task = await env.DB.prepare("SELECT attempt_no, order_id, task_type FROM tasks WHERE id=?")
     .bind(taskId)
-    .first<{ attempt_no: number; order_id: string }>();
+    .first<{ attempt_no: number; order_id: string; task_type: string }>();
   if (!task) return; // 非 D1 登记的任务（纯 DO 测试）无需镜像
   const attemptId = `${taskId}#${task.attempt_no}`;
   if (status === "running") {
@@ -63,6 +63,9 @@ async function mirrorTaskState(
     ]);
   } else if (["succeeded", "failed", "retry_wait"].includes(status)) {
     const finished = ["succeeded", "failed"].includes(status);
+    // stage-cloud-28：辅助任务（如 chaoxing.courses 查课）完成不终结订单 ——
+    // 订单终态只由主任务（*.run）驱动，否则查完课订单就变 succeeded 无法再入队。
+    const auxiliary = task.task_type.endsWith(".courses");
     await env.DB.batch([
       env.DB.prepare(
         "UPDATE tasks SET status=?, error_code=COALESCE(?,error_code), finished_at=COALESCE(finished_at,?), updated_at=? WHERE id=?",
@@ -71,9 +74,9 @@ async function mirrorTaskState(
         `UPDATE task_attempts SET status=?, finished_at=COALESCE(finished_at,?), error_code=COALESCE(?,error_code), updated_at=?
          WHERE task_id=? AND attempt_no=(SELECT attempt_no FROM tasks WHERE id=?) AND status IN ('running','leased')`,
       ).bind(status === "retry_wait" ? "failed" : status, finished ? now : null, errorCode ?? null, now, taskId, taskId),
-      ...(finished
+      ...(finished && !auxiliary
         ? [
-            env.DB.prepare("UPDATE orders SET status=?, updated_at=? WHERE id=?").bind(
+            env.DB.prepare("UPDATE orders SET status=?, control='', updated_at=? WHERE id=?").bind(
               status,
               now,
               task.order_id,
@@ -173,11 +176,25 @@ export async function executorHeartbeat(env: Env, request: Request): Promise<Res
   if (typeof body["task_id"] !== "string" || typeof body["lease_id"] !== "string") {
     return errorResponse(400, "VALIDATION_FAILED");
   }
-  return coordinator(env, String(body["execution_path"]), {
+  const res = await coordinator(env, String(body["execution_path"]), {
     type: "heartbeat",
     task_id: body["task_id"],
     lease_id: body["lease_id"],
   });
+  // stage-cloud-28：控制信令随心跳下发 —— Executor 据此挂起/恢复引擎子进程
+  if (res.status === 200) {
+    try {
+      const out = (await res.clone().json()) as Record<string, unknown>;
+      const ctrl = await env.DB.prepare("SELECT control FROM orders WHERE id=(SELECT order_id FROM tasks WHERE id=?)")
+        .bind(String(body["task_id"]))
+        .first<{ control: string | null }>();
+      out["control"] = ctrl?.control === "paused" ? "pause" : "resume";
+      return Response.json(out, { status: 200 });
+    } catch {
+      return res; // 解析失败回退原始响应
+    }
+  }
+  return res;
 }
 
 export async function executorComplete(env: Env, request: Request): Promise<Response> {
