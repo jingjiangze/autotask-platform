@@ -1,0 +1,507 @@
+/**
+ * stage-cloud-09 — PathCoordinator Durable Object（计划 §41/§83）
+ *
+ * 调度中枢：每个 execution_path（local/internal/external）一个 DO 实例
+ * （idFromName(path)），互不串扰。职责：
+ *   - 该路径的任务队列（FIFO，能力匹配过滤）
+ *   - 租约签发（claim）与续期（heartbeat）
+ *   - 租约过期回收（alarm → stale_suspected，计划 §46）
+ *   - retry_wait 定时回队（alarm）
+ *
+ * 状态转移一律复用 stage-cloud-07 的 TaskStateMachine，禁止绕过。
+ * DO 内部消息走 fetch("/message")，stage-cloud-10 由 HTTP API 层暴露。
+ * D1 tasks 表仍是持久真相：DO 是调度态缓存，后续 stage 同步双写。
+ */
+
+import {
+  deepScanForbidden,
+  buildTaskDispatch,
+  type ExecutionPath,
+  type TaskStatus,
+} from "../types/protocol";
+import { transitionTask } from "../tasks/task-state";
+import { backoffForAttempt } from "../tasks/retry-service";
+
+// §44/§101：lease 120s + heartbeat 30s（Cloudflare Free 预算内默认节奏）
+export const DEFAULT_LEASE_TTL_MS = 120 * 1000;
+export const DEFAULT_RETRY_DELAY_MS = 60 * 1000;
+
+interface QueueTask {
+  task_id: string;
+  order_id: string;
+  task_type: string;
+  required_capabilities: string[];
+  payload: Record<string, unknown>;
+  trace_id: string;
+  status: TaskStatus;
+  attempt_no: number;
+  max_attempts: number;
+  lease_id: string | null;
+  lease_expires_at: number | null;
+  executor_id: string | null;
+  retry_at: number | null;
+  enqueued_at: number;
+  updated_at: number;
+  priority: number; // stage-cloud-28：越大越先出队（同级仍 FIFO）
+}
+
+type CoordMessage =
+  | {
+      type: "enqueue";
+      task_id: string;
+      order_id: string;
+      task_type: string;
+      required_capabilities: string[];
+      payload: Record<string, unknown>;
+      trace_id?: string;
+      max_attempts?: number;
+      priority?: number;
+    }
+  | {
+      // stage-cloud-28：订单级控制——排队任务的优先级热更新（暂停/恢复走 D1 control + 心跳下发）
+      type: "control";
+      order_id: string;
+      priority?: number;
+    }
+  | {
+      type: "claim";
+      executor_id: string;
+      execution_path: ExecutionPath;
+      capabilities: string[];
+      version?: string; // §41/§34：pull 附带上报，调度侧仅记录
+      capacity?: number;
+      active_tasks?: number;
+    }
+  | { type: "ack"; task_id: string; lease_id: string; attempt_id?: string }
+  | { type: "heartbeat"; task_id: string; lease_id: string; attempt_id?: string }
+  | {
+      type: "complete";
+      task_id: string;
+      lease_id: string;
+      outcome: "succeeded" | "failed" | "retry_wait";
+      error_code?: string;
+      attempt_id?: string;
+    }
+  | {
+      // §38：Executor 确认取消 —— running→cancel_requested→canceled 两跳（§23）
+      type: "cancel-ack";
+      task_id: string;
+      lease_id: string;
+      attempt_id?: string;
+    }
+  | { type: "requeue"; task_id: string }
+  | { type: "cancel"; task_id: string }
+  | { type: "verify-lease"; task_id: string; lease_id: string }
+  | { type: "stats" };
+
+function fail(code: string, message: string): Response {
+  return Response.json({ ok: false, error: { code, message } }, { status: 400 });
+}
+
+/** §47： fencing 失败统一 409 STALE_LEASE —— 旧 Executor 的回报必须被拒绝。 */
+function staleLease(message: string): Response {
+  return Response.json({ ok: false, error: { code: "STALE_LEASE", message } }, { status: 409 });
+}
+
+/** §47：attempt_id 三元 fencing 之一 —— 形如 {task_id}#{attempt_no}。 */
+function attemptIdFor(taskId: string, attemptNo: number): string {
+  return `${taskId}#${attemptNo}`;
+}
+
+function attemptMismatch(t: QueueTask, provided: unknown): boolean {
+  return typeof provided === "string" && provided.length > 0 && provided !== attemptIdFor(t.task_id, t.attempt_no);
+}
+
+export class PathCoordinator implements DurableObject {
+  private readonly storage: DurableObjectStorage;
+  private readonly env: Record<string, string | undefined>;
+
+  constructor(state: DurableObjectState, env: Record<string, string | undefined>) {
+    this.storage = state.storage;
+    this.env = env;
+  }
+
+  private leaseTtl(): number {
+    const n = Number(this.env["LEASE_TTL_MS"]);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_LEASE_TTL_MS;
+  }
+
+  private retryDelay(): number {
+    const n = Number(this.env["RETRY_DELAY_MS"]);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_RETRY_DELAY_MS;
+  }
+
+  /** §53：固定 env 优先；未配置时按 attempt 指数退避+jitter。 */
+  private retryDelayFor(attemptNo: number): number {
+    if (this.env["RETRY_DELAY_MS"]) return this.retryDelay();
+    return backoffForAttempt(attemptNo);
+  }
+
+  private async getTask(taskId: string): Promise<QueueTask | null> {
+    return (await this.storage.get<QueueTask>(`task:${taskId}`)) ?? null;
+  }
+
+  private async putTask(t: QueueTask): Promise<void> {
+    t.updated_at = Date.now();
+    await this.storage.put(`task:${t.task_id}`, t);
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/message" && request.method === "POST") {
+      let msg: CoordMessage;
+      try {
+        msg = (await request.json()) as CoordMessage;
+      } catch {
+        return fail("VALIDATION_FAILED", "body must be JSON");
+      }
+      try {
+        return await this.handle(msg);
+      } catch (e) {
+        return fail("COORDINATOR_ERROR", e instanceof Error ? e.message : "unknown");
+      }
+    }
+    return fail("NOT_FOUND", "unknown coordinator route");
+  }
+
+  async handle(msg: CoordMessage): Promise<Response> {
+    switch (msg.type) {
+      case "enqueue":
+        return this.enqueue(msg);
+      case "control":
+        return this.control(msg);
+      case "claim":
+        return this.claim(msg);
+      case "ack":
+        return this.ack(msg);
+      case "heartbeat":
+        return this.heartbeat(msg);
+      case "complete":
+        return this.complete(msg);
+      case "cancel-ack":
+        return this.cancelAck(msg);
+      case "requeue":
+        return this.requeue(msg.task_id, Date.now());
+      case "cancel": {
+        // stage-cloud-28：取消 DO 侧任务（仅 queued/leased 且租约过期可取消；运行中由租约到期自然回收）
+        const t = await this.getTask(msg.task_id);
+        if (!t) return fail("TASK_INVALID", "unknown task");
+        if (t.status === "queued" || (t.status === "leased" && (t.lease_expires_at ?? 0) < Date.now())) {
+          t.status = "canceled";
+          t.updated_at = Date.now();
+          await this.putTask(t);
+          return Response.json({ ok: true, status: "canceled" });
+        }
+        return fail("INVALID_TRANSITION", `cannot cancel in ${t.status}`);
+      }
+      case "verify-lease":
+        return this.verifyLease(msg.task_id, msg.lease_id);
+      case "stats":
+        return this.stats();
+      default:
+        return fail("VALIDATION_FAILED", "unknown message type");
+    }
+  }
+
+  private async enqueue(
+    msg: Extract<CoordMessage, { type: "enqueue" }>,
+  ): Promise<Response> {
+    if (typeof msg.task_id !== "string" || msg.task_id.length === 0) {
+      return fail("VALIDATION_FAILED", "task_id required");
+    }
+    // 计划 §33：凭据形 payload 在源头拒绝
+    const hits = deepScanForbidden(msg.payload, "");
+    if (hits.length > 0) {
+      return fail("PAYLOAD_FORBIDDEN", `credential-like keys forbidden: ${hits.join(",")}`);
+    }
+    const existing = await this.getTask(msg.task_id);
+    if (existing && !["succeeded", "failed", "canceled"].includes(existing.status)) {
+      return fail("TASK_EXISTS", `task ${msg.task_id} already ${existing.status}`);
+    }
+    const now = Date.now();
+    const task: QueueTask = {
+      task_id: msg.task_id,
+      order_id: msg.order_id,
+      task_type: msg.task_type,
+      required_capabilities: msg.required_capabilities ?? [],
+      payload: msg.payload ?? {},
+      trace_id: msg.trace_id ?? crypto.randomUUID(),
+      status: "queued",
+      attempt_no: existing ? existing.attempt_no : 0,
+      max_attempts:
+        typeof msg.max_attempts === "number" && msg.max_attempts >= 1
+          ? msg.max_attempts
+          : (existing?.max_attempts ?? 2), // §52：默认预算 2 次尝试
+      lease_id: null,
+      lease_expires_at: null,
+      executor_id: null,
+      retry_at: null,
+      enqueued_at: now,
+      updated_at: now,
+      priority: typeof msg.priority === "number" ? msg.priority : 0,
+    };
+    await this.putTask(task);
+    return Response.json({ ok: true, task_id: task.task_id, status: "queued" }, { status: 201 });
+  }
+
+  // stage-cloud-28：排队任务优先级热更新（仅 queued 生效；运行中任务不受影响）
+  private async control(
+    msg: Extract<CoordMessage, { type: "control" }>,
+  ): Promise<Response> {
+    const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
+    let updated = 0;
+    for (const t of entries.values()) {
+      if (t.order_id !== msg.order_id || t.status !== "queued") continue;
+      if (typeof msg.priority === "number") {
+        t.priority = msg.priority;
+        t.updated_at = Date.now();
+        await this.putTask(t);
+        updated += 1;
+      }
+    }
+    return Response.json({ ok: true, updated });
+  }
+
+  private async claim(
+    msg: Extract<CoordMessage, { type: "claim" }>,
+  ): Promise<Response> {
+    const now = Date.now();
+    const caps = new Set(msg.capabilities ?? []);
+    const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
+    // 出队：priority 降序优先，同级按 enqueued_at FIFO；能力不匹配的跳过（不阻塞后面任务）
+    const candidates = [...entries.values()].sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.enqueued_at - b.enqueued_at,
+    );
+    for (const t of candidates) {
+      if (t.status !== "queued") continue;
+      if (!t.required_capabilities.every((c) => caps.has(c))) continue;
+      const tr = transitionTask(t.status, "leased");
+      if (!tr.ok) continue;
+      const leaseId = crypto.randomUUID();
+      t.status = "leased";
+      t.lease_id = leaseId;
+      t.lease_expires_at = now + this.leaseTtl();
+      t.executor_id = msg.executor_id;
+      t.attempt_no += 1;
+      await this.putTask(t);
+      const dispatch = buildTaskDispatch({
+        task_id: t.task_id,
+        order_id: t.order_id,
+        attempt_id: `${t.task_id}#${t.attempt_no}`,
+        attempt_no: t.attempt_no,
+        execution_path: msg.execution_path,
+        task_type: t.task_type,
+        lease_id: leaseId,
+        lease_expires_at: t.lease_expires_at,
+        issued_at: now,
+        trace_id: t.trace_id,
+        required_capabilities: t.required_capabilities,
+        payload: t.payload,
+      });
+      await this.scheduleAlarm(now);
+      return Response.json({ ok: true, task: dispatch }, { status: 200 });
+    }
+    // 空命中也要唤醒 alarm：让已过期租约的 stale 回收不依赖新任务入队（stage-22 修复）
+    await this.scheduleAlarm(now);
+    return Response.json({ ok: true, task: null }, { status: 200 });
+  }
+
+  private async ack(msg: Extract<CoordMessage, { type: "ack" }>): Promise<Response> {
+    const t = await this.getTask(msg.task_id);
+    if (!t || t.lease_id !== msg.lease_id) {
+      return fail("LEASE_INVALID", "unknown task or lease mismatch");
+    }
+    if (attemptMismatch(t, msg.attempt_id)) return staleLease("attempt_id mismatch (§47)");
+    const tr = transitionTask(t.status, "running");
+    if (!tr.ok) return fail("INVALID_TRANSITION", tr.reason ?? "");
+    t.status = "running";
+    await this.putTask(t);
+    return Response.json({ ok: true, status: "running" });
+  }
+
+  private async heartbeat(msg: Extract<CoordMessage, { type: "heartbeat" }>): Promise<Response> {
+    const t = await this.getTask(msg.task_id);
+    if (!t || t.lease_id !== msg.lease_id) {
+      return fail("LEASE_INVALID", "unknown task or lease mismatch");
+    }
+    if (attemptMismatch(t, msg.attempt_id)) return staleLease("attempt_id mismatch (§47)");
+    if (!["leased", "running"].includes(t.status)) {
+      return fail("INVALID_TRANSITION", `cannot heartbeat in ${t.status}`);
+    }
+    // stage-22 修复：过期租约不允许续期（即使 alarm 尚未回收）
+    if (t.lease_expires_at !== null && t.lease_expires_at <= Date.now()) {
+      return fail("LEASE_INVALID", "lease expired");
+    }
+    const before = t.lease_expires_at ?? 0;
+    t.lease_expires_at = Date.now() + this.leaseTtl();
+    await this.putTask(t);
+    return Response.json({
+      ok: true,
+      lease_expires_at: t.lease_expires_at,
+      extended_ms: t.lease_expires_at - before,
+    });
+  }
+
+  private async complete(
+    msg: Extract<CoordMessage, { type: "complete" }>,
+  ): Promise<Response> {
+    const t = await this.getTask(msg.task_id);
+    if (!t || t.lease_id !== msg.lease_id) {
+      // 幂等（§15/§53）：Executor 网络重试导致的重复 complete，若任务已达
+      // 终态则返回当前状态而非报错，保证 at-least-once 语义下结果不重复计。
+      if (t && ["succeeded", "failed", "canceled"].includes(t.status)) {
+        return Response.json({ ok: true, status: t.status, idempotent: true });
+      }
+      return fail("LEASE_INVALID", "unknown task or lease mismatch");
+    }
+    if (attemptMismatch(t, msg.attempt_id)) return staleLease("attempt_id mismatch (§47)");
+    // stage-22 修复：过期租约不允许 complete（先由 alarm 转 stale 走恢复流程）
+    if (
+      t.lease_expires_at !== null &&
+      t.lease_expires_at <= Date.now() &&
+      ["leased", "running"].includes(t.status)
+    ) {
+      return fail("LEASE_INVALID", "lease expired");
+    }
+    const tr = transitionTask(t.status, msg.outcome);
+    if (!tr.ok) return fail("INVALID_TRANSITION", tr.reason ?? "");
+    t.status = msg.outcome;
+    if (msg.outcome === "retry_wait") {
+      // 计划 §52：重试预算 —— attempt_no 已随 claim 递增，超预算直接 failed
+      if (t.attempt_no >= t.max_attempts) {
+        t.status = "failed";
+        t.lease_id = null;
+        t.lease_expires_at = null;
+        t.retry_at = null;
+        await this.putTask(t);
+        return Response.json({
+          ok: true,
+          status: "failed",
+          reason: "RETRY_BUDGET_EXHAUSTED",
+          attempt_no: t.attempt_no,
+        });
+      }
+      t.retry_at = Date.now() + this.retryDelayFor(t.attempt_no);
+      await this.putTask(t);
+      await this.scheduleAlarm(t.retry_at);
+    } else {
+      t.lease_id = null;
+      t.lease_expires_at = null;
+      await this.putTask(t);
+    }
+    return Response.json({ ok: true, status: t.status });
+  }
+
+  /** §38 cancel-ack：Executor 确认停止。running 走 §23 两跳，leased 可直达 canceled。 */
+  private async cancelAck(
+    msg: Extract<CoordMessage, { type: "cancel-ack" }>,
+  ): Promise<Response> {
+    const t = await this.getTask(msg.task_id);
+    if (!t || t.lease_id !== msg.lease_id) {
+      return fail("LEASE_INVALID", "unknown task or lease mismatch");
+    }
+    if (attemptMismatch(t, msg.attempt_id)) return staleLease("attempt_id mismatch (§47)");
+    if (t.status === "running") {
+      const first = transitionTask("running", "cancel_requested");
+      if (!first.ok) return fail("INVALID_TRANSITION", first.reason ?? "");
+      t.status = "cancel_requested";
+    }
+    const tr = transitionTask(t.status, "canceled");
+    if (!tr.ok) return fail("INVALID_TRANSITION", tr.reason ?? "");
+    t.status = "canceled";
+    t.lease_id = null;
+    t.lease_expires_at = null;
+    await this.putTask(t);
+    return Response.json({ ok: true, status: "canceled" });
+  }
+
+  private async requeue(taskId: string, now: number): Promise<Response> {
+    const t = await this.getTask(taskId);
+    if (!t) return fail("TASK_NOT_FOUND", "unknown task");
+    // stale → retry_wait → queued 两跳（§46 恢复路径）；其余状态直接跳 queued
+    const first =
+      t.status === "stale_suspected"
+        ? transitionTask(t.status, "retry_wait")
+        : transitionTask(t.status, "queued");
+    if (!first.ok) return fail("INVALID_TRANSITION", first.reason ?? "");
+    if (t.status === "stale_suspected") {
+      const second = transitionTask("retry_wait", "queued");
+      if (!second.ok) return fail("INVALID_TRANSITION", second.reason ?? "");
+    }
+    t.status = "queued";
+    t.lease_id = null;
+    t.lease_expires_at = null;
+    t.executor_id = null;
+    t.retry_at = null;
+    t.enqueued_at = now; // 重新排队到队尾
+    await this.putTask(t);
+    return Response.json({ ok: true, status: t.status });
+  }
+
+  /** 计划 §46：租约过期 → stale_suspected；retry_wait 到期 → 回队。 */
+  async alarm(): Promise<void> {
+    const now = Date.now();
+    const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
+    let nextWake: number | null = null;
+    for (const t of entries.values()) {
+      if (
+        ["leased", "running"].includes(t.status) &&
+        t.lease_expires_at !== null &&
+        t.lease_expires_at <= now
+      ) {
+        const tr = transitionTask(t.status, "stale_suspected");
+        if (tr.ok) {
+          t.status = "stale_suspected";
+          await this.putTask(t);
+        }
+      } else if (t.status === "retry_wait" && t.retry_at !== null && t.retry_at <= now) {
+        await this.requeue(t.task_id, now);
+      }
+      if (
+        t.status === "retry_wait" &&
+        t.retry_at !== null &&
+        (nextWake === null || t.retry_at < nextWake)
+      ) {
+        nextWake = t.retry_at;
+      }
+    }
+    if (nextWake !== null) await this.storage.setAlarm(nextWake);
+  }
+
+  private async scheduleAlarm(earliest: number): Promise<void> {
+    const current = await this.storage.getAlarm();
+    if (current === null || current > earliest) {
+      await this.storage.setAlarm(earliest);
+    }
+  }
+
+  /** stage-cloud-11：凭据解封前置校验 —— 租约存在、匹配、未过期且处于活跃态。 */
+  private async verifyLease(taskId: string, leaseId: string): Promise<Response> {
+    const t = await this.getTask(taskId);
+    if (!t || t.lease_id !== leaseId) {
+      return Response.json({ ok: true, valid: false, reason: "LEASE_MISMATCH" });
+    }
+    if (!["leased", "running"].includes(t.status)) {
+      return Response.json({ ok: true, valid: false, reason: `STATUS_${t.status}` });
+    }
+    if (t.lease_expires_at !== null && t.lease_expires_at <= Date.now()) {
+      return Response.json({ ok: true, valid: false, reason: "LEASE_EXPIRED" });
+    }
+    return Response.json({
+      ok: true,
+      valid: true,
+      order_id: t.order_id,
+      attempt_no: t.attempt_no,
+      lease_expires_at: t.lease_expires_at,
+    });
+  }
+
+  private async stats(): Promise<Response> {
+    const entries = await this.storage.list<QueueTask>({ prefix: "task:" });
+    const byStatus: Record<string, number> = {};
+    for (const t of entries.values()) {
+      byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+    }
+    return Response.json({ ok: true, by_status: byStatus, total: entries.size });
+  }
+}

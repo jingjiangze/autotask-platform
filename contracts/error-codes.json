@@ -1,0 +1,29 @@
+{
+  "$id": "autotask/error-codes.json",
+  "spec": "140-point plan §50",
+  "codes": [
+    "AUTH_FAILED",
+    "TASK_INVALID",
+    "PARAM_INVALID",
+    "THIRD_PARTY_LOGIN_FAILED",
+    "THIRD_PARTY_RATE_LIMIT",
+    "CAPTCHA_REQUIRED",
+    "NETWORK_TIMEOUT",
+    "NETWORK_ERROR",
+    "EXECUTOR_CRASH",
+    "EXECUTOR_UNAVAILABLE",
+    "PROCESS_TIMEOUT",
+    "CANCELED",
+    "STALE_LEASE",
+    "CLOUDFLARE_ERROR",
+    "UNKNOWN"
+  ],
+  "auto_retryable": ["NETWORK_TIMEOUT", "NETWORK_ERROR", "EXECUTOR_CRASH", "PROCESS_TIMEOUT"],
+  "http_mapping": {
+    "STALE_LEASE": 409,
+    "LEASE_INVALID": 400,
+    "AUTH_FAILED": 401,
+    "TASK_INVALID": 404,
+    "PARAM_INVALID": 400
+  }
+}

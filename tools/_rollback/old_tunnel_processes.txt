@@ -1,0 +1,2 @@
+pid=15424 cmd=D:\web\cf\cloudflared.exe tunnel --config C:\Users\Administrator\.cloudflared\wk_config.yml --no-autoupdate --metrics 127.0.0.1:20241 run wk-platform
+pid=40192 cmd=gdq (DO NOT TOUCH)

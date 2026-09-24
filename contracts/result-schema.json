@@ -1,0 +1,20 @@
+{
+  "$id": "autotask/result-schema.json",
+  "title": "TaskCompletion / TaskFailure",
+  "spec": "140-point plan §38/§47/§48/§50",
+  "required": ["executor_id", "execution_path", "task_id", "attempt_id", "lease_id"],
+  "properties": {
+    "executor_id": { "type": "string", "minLength": 1 },
+    "execution_path": { "enum": ["local", "internal", "external"] },
+    "task_id": { "type": "string", "minLength": 1 },
+    "attempt_id": { "type": "string", "pattern": "^.+#[0-9]+$" },
+    "lease_id": { "type": "string", "minLength": 1 },
+    "outcome": { "enum": ["succeeded", "failed", "retry_wait"], "note": "complete only" },
+    "error_code": { "enum": ["AUTH_FAILED", "TASK_INVALID", "PARAM_INVALID", "THIRD_PARTY_LOGIN_FAILED", "THIRD_PARTY_RATE_LIMIT", "CAPTCHA_REQUIRED", "NETWORK_TIMEOUT", "NETWORK_ERROR", "EXECUTOR_CRASH", "EXECUTOR_UNAVAILABLE", "PROCESS_TIMEOUT", "CANCELED", "STALE_LEASE", "CLOUDFLARE_ERROR", "UNKNOWN"], "note": "required for fail; forbidden pattern in logs (§68)" },
+    "result": { "type": "object", "note": "free-form business result; no credentials" },
+    "artifacts": { "type": "array", "items": { "type": "object", "properties": { "type": { "type": "string" }, "r2_object_key": { "type": "string" }, "sha256": { "type": "string" }, "size_bytes": { "type": "integer" } } } },
+    "exit_code": { "type": "integer" }
+  },
+  "idempotency": "duplicate complete for same task_id+attempt_id returns 200 idempotent (plan §49)",
+  "retry_policy": { "max_attempts": 2, "auto_retry": ["NETWORK_TIMEOUT", "NETWORK_ERROR", "EXECUTOR_CRASH", "PROCESS_TIMEOUT"], "backoff": { "attempt1": "30s+jitter", "attempt2": "60s+jitter", "cap": "15min" } }
+}

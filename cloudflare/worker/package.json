@@ -1,0 +1,25 @@
+{
+  "name": "autotask-central-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "stage-cloud-03 bootstrap: Cloudflare central control plane (health only)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.2.1",
+    "@cloudflare/workers-types": "^5.20260922.1",
+    "@napi-rs/keyring": "^1.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.136.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260921.1": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+ "ts": "2026-09-22 00:41:43",
+ "procs": [
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe \"D:\\web\\health_manager.py\"       1908             17908",
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe \"D:\\web\\health_manager.py\"       17908            40060",
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe D:\\web\\order_platform.py         40060            45148",
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe D:\\web\\order_platform.py         45148            37764",
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe \"D:\\web\\maa_status\\server.py\"    1908             6476",
+  "C:\\Users\\Administrator\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\pythonw.exe \"D:\\web\\maa_status\\server.py\"    6476             17568",
+  "D:\\web\\cf\\cloudflared.exe tunnel --config C:\\Users\\Administrator\\.cloudflared\\wk_config.yml --no-autoupdate --metrics 127.0.0.1:20241 run wk-platform  40060            15424",
+  "D:\\web\\cf\\cloudflared.exe tunnel --config C:/Users/Administrator/.cloudflared/gdq_config.yml --no-autoupdate --metrics 127.0.0.1:20242 run             25572            40192"
+ ]
+}
