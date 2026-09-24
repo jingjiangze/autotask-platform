@@ -55,9 +55,11 @@ class TaskContext:
                 self.client, self.task_id, self.lease_id, self.attempt_id)
         return self._credentials.get()
 
-    def upload(self, content: bytes, artifact_type: str = "stdout") -> dict[str, Any]:
+    def upload(self, content: bytes, artifact_type: str = "stdout",
+               content_type: str = "text/plain") -> dict[str, Any]:
         return ArtifactUploader(self.client).upload(
-            self.task_id, self.lease_id, content, artifact_type=artifact_type)
+            self.task_id, self.lease_id, content, artifact_type=artifact_type,
+            content_type=content_type)
 
     # stage-cloud-28：进程树挂起/恢复（实际控制逻辑见 runtime/process.py）
     def suspend_engine(self) -> bool:

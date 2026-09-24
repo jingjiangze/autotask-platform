@@ -304,16 +304,16 @@ function drawBuy(code){
   const p=products.find(x=>x.code===code);
   buyCourses=[];
   $("v-buy").innerHTML='<h3 style="margin:20px 0 6px"><span class="wiz-num on">1</span>确认商品'+
-    '<span class="wiz-num" style="margin-left:16px">2</span>账号密码 & 查课选课'+
+    '<span class="wiz-num" style="margin-left:16px">2</span>登录 & 查课选课'+
     '<span class="wiz-num" style="margin-left:16px">3</span>提交</h3>'+
     (p?'<div class="card"><div class="avatar">'+(PICON[p.platform]||"⚙")+'</div><h3>'+esc(p.name)+'</h3>'+
       '<p class="text-secondary small">'+esc(p.description||"")+'</p>'+
-      '<label>网课账号（手机号/学号）</label><input id="bw-acc" placeholder="13800000000">'+
+      (p.platform==="zhsqr"? '<div style="display:flex;gap:10px;margin-top:12px;align-items:center">'+'<button class="btn out" id="bw-qbtn" onclick="qrStart(\\''+esc(p.code)+'\\')">📷 开始扫码登录（知到 App）</button>'+'<span class="small muted" id="bw-qstat"></span></div>'+'<div id="bw-qr" style="margin-top:12px"></div><div id="bw-courses"></div>': '<label>网课账号（手机号/学号）</label><input id="bw-acc" placeholder="13800000000">'+
       '<label>密码（enc-v2 加密托管，执行期才按租约解封）</label><input id="bw-pass" type="password">'+
       '<div style="display:flex;gap:10px;margin-top:12px;align-items:center">'+
         '<button class="btn out" id="bw-qbtn" onclick="queryCourses(\\''+esc(p.code)+'\\')">🔍 查询课表（本机真实登录）</button>'+
-        '<span class="small muted" id="bw-qstat"></span></div>'+
-      '<div id="bw-courses"></div>'+
+        '<span class="small muted" id="bw-qstat"></span></div>'
+      )+
       '<label>执行路径</label><select id="bw-path"><option value="local">local（本机真实引擎）</option><option value="internal">internal（云端沙箱）</option></select>'+
       '<button class="btn" style="margin-top:14px" id="bw-btn" onclick="buySubmit(\\''+esc(p.code)+'\\')">提交订单</button></div>'
      :'<div class="card muted">未找到商品 '+esc(code||"")+'。'+(products.length?'可选：<a onclick="go(\\'home\\')" style="cursor:pointer">回首页</a>':'商品未上架。')+'</div>');
@@ -324,7 +324,6 @@ async function queryCourses(code){
   if(!acc||!pass)return toast("请先填写账号和密码");
   const p=products.find(x=>x.code===code)||{};
   const plat=p.platform||"chaoxing";
-  if(plat==="zhsqr")return toast("扫码刷取为本地交互流程，云端暂不支持，请选择视频刷取商品");
   const stat=$("bw-qstat");stat.textContent="创建订单并入队查询…";
   try{
     // 先建订单（幂等键），凭据 enc-v2 随查课请求加密入库
@@ -353,12 +352,48 @@ async function queryCourses(code){
   }catch(e){stat.textContent="查询失败："+e.message}
 }
 
+async function qrStart(code){
+  const stat=$("bw-qstat");const btn=$("bw-qbtn");if(btn)btn.disabled=true;
+  try{
+    stat.textContent="创建订单并请求二维码…";
+    let oid=window._buyOrder;
+    if(!oid){const o=await api("/api/v1/orders",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({product_code:code,platform:"zhsqr",account:""})});oid=o.order_id;window._buyOrder=oid}
+    const q=await api("/api/v1/orders/"+oid+"/qr/start",{method:"POST",body:JSON.stringify({execution_path:"local"})});
+    stat.textContent="二维码生成中（本机引擎）…";
+    let art=null,task=null;
+    for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,3000));
+      const d=await api("/api/v1/tasks/"+q.task_id);task=d.task;
+      art=(d.artifacts||[]).find(a=>a.artifact_type==="qr_png");
+      if(art)break;
+      if(["failed","canceled"].includes(task.status))break}
+    if(!art){if(btn)btn.disabled=false;window._buyOrder=null;const ec=task&&task.error_code;stat.textContent="取码失败："+(ec==="EXECUTOR_CRASH"||!ec?"引擎未在线或异常，请确认本机执行器已启动":ec);return}
+    $("bw-qr").innerHTML='<img src="/api/v1/orders/'+oid+'/artifacts/'+art.id+'" alt="二维码" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:8px">';
+    stat.textContent="请用「知到」App 扫码并确认登录（约 3 分钟内有效）…";
+    for(let i=0;i<70;i++){await new Promise(r=>setTimeout(r,3000));
+      const d=await api("/api/v1/tasks/"+q.task_id);task=d.task;
+      const rj=(d.artifacts||[]).find(a=>a.artifact_type==="result_json");
+      if(rj){art=rj;break}
+      if(["failed","canceled"].includes(task.status))break}
+    if(!art||(task&&["failed","canceled"].includes(task.status))){if(btn)btn.disabled=false;window._buyOrder=null;const ec=task&&task.error_code;const msg={QR_EXPIRED:"二维码已过期/超时，请重新扫码",QR_CANCELED:"已在 App 上取消登录",QR_QUERY_FAILED:"扫码成功但查询课表失败，请重试"}[ec]||"超时，请重新扫码";stat.textContent="扫码未完成："+msg;return}
+    const r=await fetch("/api/v1/orders/"+oid+"/artifacts/"+art.id);
+    const res=await r.json();
+    if(!res||res.ok===false){if(btn)btn.disabled=false;window._buyOrder=null;stat.textContent="扫码未完成："+((res&&res.error)||"请重新扫码");return}
+    buyCourses=(res&&res.courses)||[];
+    stat.textContent="扫码成功，查询到 "+buyCourses.length+" 门课程（勾选后提交）";
+    $("bw-courses").innerHTML=buyCourses.length?'<label>勾选要刷的课程</label><div class="card sm" style="max-height:280px;overflow:auto">'+
+      buyCourses.map((c,i)=>'<div style="padding:4px 2px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--tx)">'+
+      '<input type="checkbox" class="bw-c" style="width:auto" value="'+esc(String(c.id!=null?c.id:(c.course_id!=null?c.course_id:c)))+'"'+(i===0?" checked":"")+'> '+esc(c.name!=null?c.name:(c.title!=null?c.title:String(c)))+'</label></div>').join("")+'</div>'
+      :'<p class="small muted">课程列表为空（可能全部已完成）</p>';
+  }catch(e){if(btn)btn.disabled=false;stat.textContent="扫码失败："+e.message}
+}
+
 async function buySubmit(code){
-  const acc=$("bw-acc").value.trim(),path=$("bw-path").value;
-  if(!acc)return toast("请填写账号");
   const p=products.find(x=>x.code===code)||{};
   const plat=p.platform||"chaoxing";
-  if(plat==="zhsqr")return toast("扫码刷取为本地交互流程，云端暂不支持");
+  const isQr=plat==="zhsqr";
+  const acc=$("bw-acc")?$("bw-acc").value.trim():"";
+  const path=$("bw-path")?$("bw-path").value:"local";
+  if(!isQr&&!acc)return toast("请填写账号");
   const btn=$("bw-btn");btn.disabled=true;
   try{
     let oid=window._buyOrder;
@@ -366,7 +401,8 @@ async function buySubmit(code){
     // 收集勾选课程 → 入队 <platform>.run
     const sel=[...document.querySelectorAll(".bw-c:checked")].map(x=>x.value);
     let tmsg="（未选课程，稍后可从详情页入队）";
-    if(sel.length){const t=await api("/api/v1/orders/"+oid+"/tasks",{method:"POST",body:JSON.stringify({execution_path:path,task_type:plat+".run",required_capabilities:[plat],payload:{courses:sel.join(","),speed:2.0,timeout_seconds:1800}})});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
+    if(sel.length){const tbody=isQr?{execution_path:"local",task_type:"zhs.run",required_capabilities:["zhs"],payload:{qr:true,order_id:oid,courses:sel.join(","),speed:2.0,timeout_seconds:1800}}:{execution_path:path,task_type:plat+".run",required_capabilities:[plat],payload:{courses:sel.join(","),speed:2.0,timeout_seconds:1800}};
+      const t=await api("/api/v1/orders/"+oid+"/tasks",{method:"POST",body:JSON.stringify(tbody)});tmsg=" 任务已入队："+t.task_id.slice(0,8)}
     window._buyOrder=null;buyCourses=[];
     toast("订单 "+oid.slice(0,8)+" 已提交。"+tmsg);go("order",oid);
   }catch(e){toast("下单失败："+e.message);btn.disabled=false}}
