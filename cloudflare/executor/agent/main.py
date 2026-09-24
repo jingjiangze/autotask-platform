@@ -80,19 +80,11 @@ class ExecutorRuntime:
         while not self.stop_event.is_set():
             if max_tasks is not None and done >= max_tasks:
                 return done
-            try:
-                task = self.client.claim(self.capabilities)
-            except OSError:
-                # 瞬时网络/TLS 抖动（如 SSL UNEXPECTED_EOF）：跳过本轮，下轮再拉
-                time.sleep(self.poll_interval)
-                continue
+            task = self.client.claim(self.capabilities)
             if not task:
                 time.sleep(self.poll_interval)
                 continue
-            try:
-                self._execute(task)
-            except OSError as e:  # 传输层抖动穿透（如 complete 兜底再失败）：不杀主循环
-                print(f"[warn] execute transport error: {e}", flush=True)
+            self._execute(task)
             done += 1
         return done
 
@@ -183,10 +175,7 @@ def main() -> int:  # pragma: no cover - 常驻入口
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
 
-    try:
-        client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
-    except OSError:
-        pass  # 瞬时网络抖动不影响常驻循环
+    client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
     runtime.run_forever()
     return 0
 
