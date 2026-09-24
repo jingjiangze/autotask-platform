@@ -42,7 +42,7 @@ def main() -> None:
     base = sys.argv[1]
 
     commits = git("log", f"{base}..HEAD", "--format=%H").splitlines()[::-1]  # oldest first
-    print(f"pushing {len(commits)} commit(s): {base}..HEAD")
+    print(f"local range: {len(commits)} commit(s): {base}..HEAD")
 
     # remote 当前 tip（父提交）
     ref = api("GET", f"/git/ref/heads/{BRANCH}", token)
@@ -50,6 +50,26 @@ def main() -> None:
     parent_commit = api("GET", f"/git/commits/{parent}", token)
     parent_tree = parent_commit["tree"]["sha"]
 
+    # 去重：本工具会在失败重试时重放提交。把远端 tip 的 message 首行对齐到本地
+    # 提交，只推送其后的提交（远端历史不重写，符合计划 §129 禁 force push）。
+    remote_head = (parent_commit["message"] or "").splitlines()[0].strip()
+    match = None
+    for i, sha in enumerate(commits):
+        if git("log", "-1", "--format=%s", sha).strip() == remote_head:
+            match = i
+            break
+    if match is None:
+        if commits:
+            local_head = git("log", "-1", "--format=%s", commits[-1]).strip()
+            if local_head == remote_head:
+                print(f"OK: remote up to date ({remote_head[:60]})")
+                return
+        raise SystemExit(f"remote tip message not found in local range: {remote_head[:80]!r}")
+    commits = commits[match + 1:]
+    if not commits:
+        print(f"OK: remote up to date ({remote_head[:60]})")
+        return
+    print(f"pushing {len(commits)} commit(s) after remote tip")
     for sha in commits:
         msg = git("log", "-1", "--format=%B", sha)
         files = [l.split("\t") for l in git("show", "--name-status", "--format=", sha).splitlines()]

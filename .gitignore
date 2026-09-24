@@ -145,3 +145,7 @@ cloudflare/**/.env.*
 *.credentials
 *.credentials.json
 cloudflare/deploy-secrets.txt
+
+# executor 临时控制凭据（E2E 运行时生成，禁止入库）
+.ctl_creds
+**/.ctl_creds
