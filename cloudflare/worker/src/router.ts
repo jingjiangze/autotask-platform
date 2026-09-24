@@ -14,11 +14,8 @@ import {
 import { registerExecutor, executorNodeHeartbeat } from "./executors/executor-auth";
 import {
   executorAck,
-  executorBootstrap,
-  executorCancelAck,
   executorClaim,
   executorComplete,
-  executorFail,
   executorHeartbeat,
 } from "./executors/executor-api";
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
@@ -33,7 +30,7 @@ import {
   listProducts,
   taskDetail,
 } from "./orders/order-service";
-import { downloadArtifact, presignArtifact, uploadArtifact } from "./storage/artifacts";
+import { downloadArtifact, uploadArtifact } from "./storage/artifacts";
 import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };
@@ -63,46 +60,24 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return registerExecutor(env, request);
   }
-  // stage-cloud-10：Executor Pull 协议（§42/§43）—— stage-31 起 §38 端点全量对齐
+  // stage-cloud-10：Executor Pull 协议（§42/§43）
   const executorPull: Record<string, (env: Env, req: Request) => Promise<Response>> = {
     claim: executorClaim,
-    pull: executorClaim, // §34：pull 为 claim 的契约名
     ack: executorAck,
-    start: executorAck, // §38：start 为 ack 的契约名（leased -> running）
     heartbeat: executorHeartbeat,
     complete: executorComplete,
-    fail: executorFail, // §38：失败专用形（error_code 必填）
-    "cancel-ack": executorCancelAck, // §38：Executor 确认取消
     // stage-cloud-11：凭据解封（租约门控）
     credentials: releaseCredentials,
     // stage-cloud-14：工件上传（raw body；元数据在 query）
     artifacts: uploadArtifact,
-    // §31：短时上传授权
-    "artifacts/presign": presignArtifact,
     // stage-cloud-13：节点级心跳
     "node-heartbeat": executorNodeHeartbeat,
   };
   if (pathname.startsWith("/api/executor/v1/")) {
     const action = pathname.slice("/api/executor/v1/".length);
-    // §35：tasks/{task_id}/bootstrap|start|complete|fail|cancel-ack 路径形路由
-    const taskRoute = /^tasks\/([A-Za-z0-9-]+)\/(bootstrap|start|complete|fail|cancel-ack)$/.exec(action);
-    if (taskRoute && request.method === "POST") {
-      const [, tid, verb] = taskRoute;
-      if (verb === "bootstrap") return executorBootstrap(env, request, tid!);
-      const innerBody = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-      const inner = new Request(request.url, {
-        method: "POST",
-        headers: request.headers,
-        body: JSON.stringify({ ...innerBody, task_id: tid }),
-      });
-      const handler = verb === "start" ? executorAck : verb === "fail" ? executorFail : verb === "cancel-ack" ? executorCancelAck : executorComplete;
-      return handler(env, inner);
-    }
     const handler = executorPull[action];
     if (handler) {
-      if (request.method !== "POST" && !(action === "artifacts" && (request.method === "PUT" || request.method === "POST"))) {
-        return errorResponse(405, "METHOD_NOT_ALLOWED");
-      }
+      if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
       return handler(env, request);
     }
   }

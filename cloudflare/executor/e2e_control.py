@@ -25,8 +25,8 @@ def check(name: str, ok: bool, note: str = ""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {name} {note}")
 
 
-def _call_once(method: str, path: str, token: str | None, body: dict | None,
-               cookie: str | None):
+def call(method: str, path: str, token: str | None = None, body: dict | None = None,
+         cookie: str | None = None):
     headers = {"Content-Type": "application/json", "User-Agent": UA}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -45,19 +45,6 @@ def _call_once(method: str, path: str, token: str | None, body: dict | None,
             return e.code, {}
 
 
-def call(method: str, path: str, token: str | None = None, body: dict | None = None,
-         cookie: str | None = None, retries: int = 3):
-    """网络容错：本机 TLS 间歇抖动（SSL UNEXPECTED_EOF）时短暂退避重试。"""
-    last: Exception | None = None
-    for i in range(retries):
-        try:
-            return _call_once(method, path, token, body, cookie)
-        except urllib.error.URLError as e:  # 连接层错误（非 HTTP 状态码）
-            last = e
-            time.sleep(0.5 * (i + 1))
-    raise last  # type: ignore[misc]
-
-
 def main() -> int:
     global base
     ap = argparse.ArgumentParser()
@@ -69,18 +56,17 @@ def main() -> int:
     base = args.base.rstrip("/")
 
     # 登录真实用户
-    cookie = None
-    for i in range(3):
-        try:
-            req = urllib.request.Request(f"{base}/api/v1/auth/login", method="POST",
-                data=json.dumps({"username": "real_owner", "password": "real-pass-123456"}).encode(),
-                headers={"Content-Type": "application/json", "User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                cookie = r.headers.get("Set-Cookie", "").split(";")[0]
-            break
-        except urllib.error.URLError:
-            time.sleep(0.5 * (i + 1))
+    req = urllib.request.Request(f"{base}/api/v1/auth/login", method="POST",
+        data=json.dumps({"username": "real_owner", "password": "real-pass-123456"}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        cookie = r.headers.get("Set-Cookie", "").split(";")[0]
     check("real_owner login", bool(cookie))
+
+    # 1. 凭据明文查看（cloud-real-001 已有 enc-v2 种子）
+    st, cred = call("GET", "/api/v1/orders/cloud-real-001/credentials", cookie=cookie)
+    check("credentials view (owner plaintext)", st == 200 and len(cred.get("password", "")) > 0,
+          f"account={cred.get('account', '')[:4]}***")
 
     # 2. 新订单 + 查课表 LIVE（真实登录 tools_query_courses）
     st, o = call("POST", "/api/v1/orders", cookie=cookie,
@@ -92,11 +78,6 @@ def main() -> int:
                        "platform": "chaoxing", "execution_path": "local"})
     check("query-courses enqueue (creds enc-v2 stored)", st == 201)
     qtask = q["task_id"]
-
-    # 1. 凭据明文查看（用本次订单：查课时已 enc-v2 入库，owner 可解密）
-    st, cred = call("GET", f"/api/v1/orders/{oid}/credentials", cookie=cookie)
-    check("credentials view (owner plaintext)", st == 200 and len(cred.get("password", "")) > 0,
-          f"account={cred.get('account', '')[:4]}***")
 
     # 本机真实 Executor（同 e2e_real）
     env = os.environ.copy()

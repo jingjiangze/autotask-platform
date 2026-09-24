@@ -36,18 +36,13 @@ class TaskContext:
     client: CentralClient
     task_id: str
     lease_id: str
-    attempt_id: str = ""  # §32/§47：dispatch 下发的 attempt_id，回报时三元 fencing
     _credentials: list[dict[str, str]] | None = field(default=None, repr=False)
     proc: Any = field(default=None, repr=False)  # stage-cloud-28：当前引擎子进程（挂起/恢复用）
 
     def credentials(self) -> list[dict[str, str]]:
-        """按需解封凭据（§35 bootstrap：租约门控；仅内存，禁止落盘/日志）。"""
+        """按需解封凭据（每任务最多一次，缓存于内存，进程结束即丢）。"""
         if self._credentials is None:
-            if self.attempt_id:
-                self._credentials = self.client.bootstrap(
-                    self.task_id, self.lease_id, self.attempt_id)["credentials"]
-            else:
-                self._credentials = self.client.release_credentials(self.task_id, self.lease_id)
+            self._credentials = self.client.release_credentials(self.task_id, self.lease_id)
         return self._credentials
 
     def upload(self, content: bytes, artifact_type: str = "stdout") -> dict[str, Any]:
@@ -85,35 +80,26 @@ class ExecutorRuntime:
         while not self.stop_event.is_set():
             if max_tasks is not None and done >= max_tasks:
                 return done
-            try:
-                task = self.client.claim(self.capabilities)
-            except OSError:
-                # 瞬时网络/TLS 抖动（如 SSL UNEXPECTED_EOF）：跳过本轮，下轮再拉
-                time.sleep(self.poll_interval)
-                continue
+            task = self.client.claim(self.capabilities)
             if not task:
                 time.sleep(self.poll_interval)
                 continue
-            try:
-                self._execute(task)
-            except OSError as e:  # 传输层抖动穿透（如 complete 兜底再失败）：不杀主循环
-                print(f"[warn] execute transport error: {e}", flush=True)
+            self._execute(task)
             done += 1
         return done
 
     def _execute(self, task: dict[str, Any]) -> None:
         task_id = task["task_id"]
         lease_id = task["lease_id"]
-        attempt_id = str(task.get("attempt_id") or f"{task_id}#{task.get('attempt_no', 1)}")
         stop_heartbeat = threading.Event()
-        ctx = TaskContext(self.client, task_id, lease_id, attempt_id)
+        ctx = TaskContext(self.client, task_id, lease_id)
         last_control = "resume"  # 幂等：只在信令变化时切换进程状态
 
         def hb() -> None:
             nonlocal last_control
             while not stop_heartbeat.wait(self.heartbeat_interval):
                 try:
-                    resp = self.client.heartbeat(task_id, lease_id, attempt_id)
+                    resp = self.client.heartbeat(task_id, lease_id)
                     # stage-cloud-28：控制信令（pause/resume）随心跳下发
                     control = resp.get("control") if isinstance(resp, dict) else None
                     if control in ("pause", "resume") and control != last_control:
@@ -128,9 +114,9 @@ class ExecutorRuntime:
         try:
             handler = self.handlers.get(task["task_type"])
             if handler is None:
-                self.client.fail(task_id, lease_id, "TASK_INVALID", "failed", attempt_id)
+                self.client.complete(task_id, lease_id, "failed", "TASK_INVALID")
                 return
-            self.client.start(task_id, lease_id, attempt_id)
+            self.client.ack(task_id, lease_id)
             try:
                 result = handler(task["payload"], ctx)
                 # 工件必须先于 complete：终态任务的上传会被服务端拒绝（LIVE 实证），
@@ -139,11 +125,11 @@ class ExecutorRuntime:
                     self.client.upload_artifact(
                         task_id, lease_id,
                         json.dumps(result, ensure_ascii=False).encode(), "result_json")
-                self.client.complete(task_id, lease_id, "succeeded", attempt_id=attempt_id)
+                self.client.complete(task_id, lease_id, "succeeded")
             except Exception as e:  # noqa: BLE001 —— 任何 handler 异常归一为可重试分类
                 code = "EXECUTOR_CRASH" if not isinstance(e, TimeoutError) else "PROCESS_TIMEOUT"
                 outcome = "retry_wait" if code in RETRYABLE_CODES else "failed"
-                self.client.complete(task_id, lease_id, outcome, code, attempt_id)
+                self.client.complete(task_id, lease_id, outcome, code)
             finally:
                 cleanup = getattr(self, "_cleanup", None)
                 if cleanup:
@@ -189,10 +175,7 @@ def main() -> int:  # pragma: no cover - 常驻入口
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
 
-    try:
-        client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
-    except OSError:
-        pass  # 瞬时网络抖动不影响常驻循环
+    client.node_heartbeat()  # 节点级心跳属 CentralClient（注册后即上报存活）
     runtime.run_forever()
     return 0
 
