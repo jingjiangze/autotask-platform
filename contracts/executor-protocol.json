@@ -1,0 +1,23 @@
+{
+  "protocol": "autotask.executor/v1",
+  "spec": "140-point plan §32/§34/§38",
+  "endpoints": {
+    "register": { "method": "POST", "path": "/api/executor/v1/register", "auth": "bootstrap_token" },
+    "heartbeat": { "method": "POST", "path": "/api/executor/v1/heartbeat", "auth": "executor_token", "note": "node-level liveness + lease renew; body carries active_tasks/local_pid/capacity (plan §41)" },
+    "pull": { "method": "POST", "path": "/api/executor/v1/pull", "auth": "executor_token", "request_fields": ["executor_id", "execution_path", "version", "capacity", "active_tasks", "capabilities"], "response": "task.dispatch | task=null" },
+    "tasks_bootstrap": { "method": "POST", "path": "/api/executor/v1/tasks/{task_id}/bootstrap", "auth": "executor_token", "note": "lease-gated credential release (plan §35); payload never carries credentials (§33)" },
+    "tasks_start": { "method": "POST", "path": "/api/executor/v1/tasks/{task_id}/start", "auth": "executor_token", "note": "leased -> running" },
+    "tasks_complete": { "method": "POST", "path": "/api/executor/v1/tasks/{task_id}/complete", "auth": "executor_token" },
+    "tasks_fail": { "method": "POST", "path": "/api/executor/v1/tasks/{task_id}/fail", "auth": "executor_token" },
+    "tasks_cancel_ack": { "method": "POST", "path": "/api/executor/v1/tasks/{task_id}/cancel-ack", "auth": "executor_token", "note": "executor confirms cancel; running -> cancel_requested -> canceled" },
+    "artifacts_presign": { "method": "POST", "path": "/api/executor/v1/artifacts/presign", "auth": "executor_token", "note": "short-lived (<=15min) upload authorization, plan §31" },
+    "artifacts_upload": { "method": "PUT", "path": "/api/executor/v1/artifacts", "auth": "executor_token | presign_token" }
+  },
+  "aliases": {
+    "claim": "/api/executor/v1/pull",
+    "ack": "/api/executor/v1/tasks/{task_id}/start",
+    "credentials": "/api/executor/v1/tasks/{task_id}/bootstrap"
+  },
+  "fencing": "every task-scoped call must carry executor_id + attempt_id + lease_id; worker validates all three (plan §47)",
+  "attempt_id_format": "{task_id}#{attempt_no}"
+}

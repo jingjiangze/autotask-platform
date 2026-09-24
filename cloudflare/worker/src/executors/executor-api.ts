@@ -13,6 +13,7 @@
 import type { Env } from "../auth/auth-service";
 import { authenticateExecutor } from "./executor-auth";
 import { errorResponse } from "../errors";
+import { releaseCredentials } from "../storage/credentials";
 
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
@@ -43,13 +44,14 @@ async function mirrorTaskState(
   executorId: string,
   status: string,
   errorCode?: string,
+  attemptId?: string,
 ): Promise<void> {
   const now = Date.now();
   const task = await env.DB.prepare("SELECT attempt_no, order_id, task_type FROM tasks WHERE id=?")
     .bind(taskId)
     .first<{ attempt_no: number; order_id: string; task_type: string }>();
   if (!task) return; // 非 D1 登记的任务（纯 DO 测试）无需镜像
-  const attemptId = `${taskId}#${task.attempt_no}`;
+  const attemptId2 = attemptId || `${taskId}#${task.attempt_no}`;
   if (status === "running") {
     await env.DB.batch([
       env.DB.prepare(
@@ -59,7 +61,7 @@ async function mirrorTaskState(
         `INSERT INTO task_attempts(id,task_id,attempt_no,executor_id,lease_id,status,started_at,last_heartbeat_at,created_at,updated_at)
          VALUES(?,?,?,?,?,'running',?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET status='running', last_heartbeat_at=excluded.last_heartbeat_at, updated_at=excluded.updated_at`,
-      ).bind(attemptId, taskId, task.attempt_no, executorId, leaseId, now, now, now, now),
+      ).bind(attemptId2, taskId, task.attempt_no, executorId, leaseId, now, now, now, now),
     ]);
   } else if (["succeeded", "failed", "retry_wait"].includes(status)) {
     const finished = ["succeeded", "failed"].includes(status);
@@ -161,6 +163,7 @@ export async function executorAck(env: Env, request: Request): Promise<Response>
     type: "ack",
     task_id: body["task_id"],
     lease_id: body["lease_id"],
+    attempt_id: typeof body["attempt_id"] === "string" ? body["attempt_id"] : undefined,
   });
   if (res.status === 200) {
     await mirrorTaskState(env, String(body["task_id"]), String(body["lease_id"]), executorId, "running");
@@ -180,6 +183,7 @@ export async function executorHeartbeat(env: Env, request: Request): Promise<Res
     type: "heartbeat",
     task_id: body["task_id"],
     lease_id: body["lease_id"],
+    attempt_id: typeof body["attempt_id"] === "string" ? body["attempt_id"] : undefined,
   });
   // stage-cloud-28：控制信令随心跳下发 —— Executor 据此挂起/恢复引擎子进程
   if (res.status === 200) {
@@ -217,6 +221,7 @@ export async function executorComplete(env: Env, request: Request): Promise<Resp
     lease_id: body["lease_id"],
     outcome,
     error_code: typeof body["error_code"] === "string" ? body["error_code"] : undefined,
+    attempt_id: typeof body["attempt_id"] === "string" ? body["attempt_id"] : undefined,
   });
   if (res.status === 200) {
     try {
@@ -231,6 +236,7 @@ export async function executorComplete(env: Env, request: Request): Promise<Resp
           executorId2,
           out.status,
           typeof body["error_code"] === "string" ? body["error_code"] : undefined,
+          typeof body["attempt_id"] === "string" ? body["attempt_id"] : undefined,
         );
       }
     } catch {
@@ -238,4 +244,93 @@ export async function executorComplete(env: Env, request: Request): Promise<Resp
     }
   }
   return res;
+}
+
+/**
+ * stage-cloud-31 — §38 fail：complete 的失败专用形（error_code 必填）。
+ * outcome 允许 failed|retry_wait；错误分类决定是否自动重试（§52）。
+ */
+export async function executorFail(env: Env, request: Request): Promise<Response> {
+  const body = await readBody(request);
+  if (!body) return errorResponse(400, "VALIDATION_FAILED");
+  const denied = await guard(env, request, body);
+  if (denied) return denied;
+  const outcome = body["outcome"] ?? "failed";
+  if (
+    typeof body["task_id"] !== "string" ||
+    typeof body["lease_id"] !== "string" ||
+    typeof body["error_code"] !== "string" ||
+    (outcome !== "failed" && outcome !== "retry_wait")
+  ) {
+    return errorResponse(400, "VALIDATION_FAILED");
+  }
+  const req2 = new Request(request.url, {
+    method: "POST",
+    headers: request.headers,
+    body: JSON.stringify({ ...body, outcome }),
+  });
+  return executorComplete(env, req2);
+}
+
+/**
+ * stage-cloud-31 — §38 cancel-ack：Executor 确认停止任务。
+ * DO 侧走 §23 两跳（running→cancel_requested→canceled）；D1 镜像 canceled。
+ */
+export async function executorCancelAck(env: Env, request: Request): Promise<Response> {
+  const body = await readBody(request);
+  if (!body) return errorResponse(400, "VALIDATION_FAILED");
+  const denied = await guard(env, request, body);
+  if (denied) return denied;
+  if (typeof body["task_id"] !== "string" || typeof body["lease_id"] !== "string") {
+    return errorResponse(400, "VALIDATION_FAILED");
+  }
+  const res = await coordinator(env, String(body["execution_path"]), {
+    type: "cancel-ack",
+    task_id: body["task_id"],
+    lease_id: body["lease_id"],
+    attempt_id: typeof body["attempt_id"] === "string" ? body["attempt_id"] : undefined,
+  });
+  if (res.status === 200) {
+    const now = Date.now();
+    await env.DB
+      .prepare("UPDATE tasks SET status='canceled', finished_at=COALESCE(finished_at,?), updated_at=? WHERE id=?")
+      .bind(now, now, String(body["task_id"]))
+      .run()
+      .catch(() => {});
+  }
+  return res;
+}
+
+/**
+ * stage-cloud-31 — §35 tasks/{id}/bootstrap：租约门控的凭据+任务元数据下发。
+ * 与 /credentials 等价（沿用其租约校验），额外附带 task 元信息；凭据仅存内存。
+ */
+export async function executorBootstrap(
+  env: Env,
+  request: Request,
+  taskId: string,
+): Promise<Response> {
+  const body = await readBody(request);
+  if (!body) return errorResponse(400, "VALIDATION_FAILED");
+  const denied = await guard(env, request, body);
+  if (denied) return denied;
+  // 复用 /credentials 的租约门控解封（body 须含 task_id/lease_id）
+  const inner = new Request(request.url, {
+    method: "POST",
+    headers: request.headers,
+    body: JSON.stringify({ ...body, task_id: taskId }),
+  });
+  const credRes = await releaseCredentials(env, inner);
+  if (credRes.status !== 200) return credRes;
+  const meta = await env.DB
+    .prepare("SELECT task_type, execution_path FROM tasks WHERE id=?")
+    .bind(taskId)
+    .first<{ task_type: string; execution_path: string }>();
+  const creds = (await credRes.json()) as { credentials?: unknown };
+  return Response.json({
+    ok: true,
+    task: { task_id: taskId, ...(meta ?? {}) },
+    credentials: creds.credentials ?? [],
+    cookies: null,
+  });
 }

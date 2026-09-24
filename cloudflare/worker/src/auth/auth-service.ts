@@ -35,6 +35,8 @@ export interface Env {
   CREDENTIAL_KEY?: string;
   /** stage-cloud-14：R2 工件桶 */
   ARTIFACTS: R2Bucket;
+  /** stage-cloud-31：presign 短时上传授权 HMAC 密钥（§31）；未配置 = presign 不可用 */
+  EXECUTOR_PRESIGN_KEY?: string;
 }
 
 export type Json = Record<string, unknown>;

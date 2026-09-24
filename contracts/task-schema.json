@@ -1,0 +1,23 @@
+{
+  "$id": "autotask/task-schema.json",
+  "title": "TaskDispatchMessage",
+  "spec": "140-point plan §32/§33",
+  "type": "object",
+  "required": ["protocol", "message_type", "task_id", "order_id", "attempt_id", "attempt_no", "execution_path", "task_type", "lease_id", "lease_expires_at", "issued_at", "trace_id", "required_capabilities", "payload"],
+  "properties": {
+    "protocol": { "const": "autotask.executor/v1" },
+    "message_type": { "const": "task.dispatch" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "order_id": { "type": "string", "minLength": 1 },
+    "attempt_id": { "type": "string", "pattern": "^.+#[0-9]+$" },
+    "attempt_no": { "type": "integer", "minimum": 1 },
+    "execution_path": { "enum": ["local", "internal", "external"] },
+    "task_type": { "type": "string", "minLength": 1 },
+    "lease_id": { "type": "string", "minLength": 1 },
+    "lease_expires_at": { "type": "integer", "minimum": 1 },
+    "issued_at": { "type": "integer", "minimum": 1 },
+    "trace_id": { "type": "string", "minLength": 1 },
+    "required_capabilities": { "type": "array", "items": { "type": "string" } },
+    "payload": { "type": "object", "note": "credential-like keys forbidden (plan §33); deep-scanned at enqueue" }
+  }
+}

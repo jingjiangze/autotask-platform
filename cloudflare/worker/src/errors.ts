@@ -21,6 +21,9 @@ export const ERROR_CODES = {
   // stage-cloud-11：凭据边界
   FORBIDDEN: "Insufficient permissions",
   LEASE_INVALID: "Unknown task or invalid lease",
+  // stage-cloud-31：§47 fencing / §50 错误码对齐
+  STALE_LEASE: "Attempt is stale: lease or attempt_id no longer current",
+  AUTH_FAILED: "Authentication failed",
   CREDENTIAL_DECRYPT_FAILED: "Credential decryption failed",
   CLOUDFLARE_ERROR: "Internal orchestration error",
 } as const;
