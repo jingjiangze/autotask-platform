@@ -15,8 +15,9 @@
 import type { Env } from "../auth/auth-service";
 import { authenticateExecutor } from "../executors/executor-auth";
 import { errorResponse } from "../errors";
+import { upsertTaskChain } from "../tasks/task-service";
+import { artifactObjectKey, putArtifact, MAX_ARTIFACT_BYTES } from "./r2";
 
-const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const PRESIGN_TTL_MS = 15 * 60 * 1000; // §31：默认只允许约 15 分钟
 
 // ---- §31 presign：短时上传授权（URL 是 bearer token，必须短时过期）----
@@ -112,48 +113,6 @@ async function verifyLease(
   return (await res.json()) as VerifyVerdict;
 }
 
-async function upsertTaskChain(
-  env: Env,
-  args: {
-    taskId: string;
-    orderId: string;
-    attemptNo: number;
-    executorId: string;
-    leaseId: string;
-    executionPath: string;
-  },
-): Promise<void> {
-  const now = Date.now();
-  await env.DB.prepare(
-    `INSERT INTO tasks(id,order_id,task_type,execution_path,status,executor_id,lease_id,lease_expires_at,attempt_no,created_at,updated_at,last_heartbeat_at)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(id) DO UPDATE SET last_heartbeat_at=excluded.last_heartbeat_at, updated_at=excluded.updated_at`,
-  )
-    .bind(
-      args.taskId,
-      args.orderId,
-      "external.task", // DO 队列回写首次落库时的占位类型
-      args.executionPath,
-      "running",
-      args.executorId,
-      args.leaseId,
-      null,
-      args.attemptNo,
-      now,
-      now,
-      now,
-    )
-    .run();
-  const attemptId = `${args.taskId}#${args.attemptNo}`;
-  await env.DB.prepare(
-    `INSERT INTO task_attempts(id,task_id,attempt_no,executor_id,lease_id,status,started_at,last_heartbeat_at,created_at,updated_at)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(id) DO UPDATE SET last_heartbeat_at=excluded.last_heartbeat_at, updated_at=excluded.updated_at`,
-  )
-    .bind(attemptId, args.taskId, args.attemptNo, args.executorId, args.leaseId, "running", now, now, now, now)
-    .run();
-}
-
 export async function uploadArtifact(env: Env, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const q = url.searchParams;
@@ -190,10 +149,8 @@ export async function uploadArtifact(env: Env, request: Request): Promise<Respon
 
   const digest = await crypto.subtle.digest("SHA-256", body);
   const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const objectKey = `artifacts/${verdict.order_id}/${taskId}/${sha256}`;
-  await env.ARTIFACTS.put(objectKey, body, {
-    httpMetadata: { contentType },
-  });
+  const objectKey = artifactObjectKey(verdict.order_id, taskId, sha256);
+  await putArtifact(env.ARTIFACTS, objectKey, body, contentType);
 
   await upsertTaskChain(env, {
     taskId,
