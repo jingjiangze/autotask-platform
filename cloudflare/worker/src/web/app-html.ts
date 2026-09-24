@@ -142,6 +142,18 @@ footer{padding:1.6rem 0;color:var(--mut);font-size:.8rem;text-align:center}
 </div>
 
 </div>
+<div id="v-admin" style="display:none">
+  <h3 style="margin:20px 0 6px">🛠 管理后台</h3>
+  <div class="card" style="display:flex;gap:8px;flex-wrap:wrap">
+    <button id="atab-stats" class="btn sm" onclick="atab('stats')">概览</button>
+    <button id="atab-exec" class="btn sm" onclick="atab('exec')">执行器</button>
+    <button id="atab-users" class="btn sm" onclick="atab('users')">用户</button>
+    <button id="atab-orders" class="btn sm" onclick="atab('orders')">订单</button>
+    <button id="atab-tasks" class="btn sm" onclick="atab('tasks')">任务</button>
+    <button id="atab-products" class="btn sm" onclick="atab('products')">商品</button>
+  </div>
+  <div id="adminBody"></div>
+</div>
 <footer>自动任务平台 b391 · 仅供个人本地测试与学习研究使用 · 不提供对外服务 · 进度数据仅供参考，一切以学习平台官方为准 · 使用即视为知悉并接受全部免责条款</footer>
 <div class="toast" id="toast"></div>
 <script>
@@ -171,7 +183,7 @@ async function api(path,opt={}){
 function go(v,arg){location.hash="#"+v+(arg?"/"+arg:"");render(v,arg)}
 function render(v,arg){
   document.querySelectorAll(".nl[data-v]").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(v==="buy"&&a.dataset.v==="home")));
-  for(const x of["home","auth","my","order","buy","query","batch","admin"])$("v-"+x).style.display=x===v?"":"none";
+  for(const x of["home","auth","my","order","buy","query","batch","admin"]){const e=$("v-"+x);if(e)e.style.display=x===v?"":"none"}
   clearInterval(pollTimer);
   if(v==="home")drawHome();
   if(v==="my"){drawMy();pollTimer=setInterval(drawMy,5000)}
@@ -204,7 +216,7 @@ async function drawAdmin(t){
         b.executors.map(x=>'<tr><td class="mono">'+esc(x.id)+'</td><td>'+esc(x.execution_path)+'</td><td>'+esc(x.version)+'</td><td>'+
         (x.enabled?(x.last_seen_at&&Date.now()-x.last_seen_at<120000?'<span class="badge b-green">online</span>':'<span class="badge b-gray">offline</span>'):'<span class="badge b-red">disabled</span>')+
         '</td><td class="small">'+fmt(x.last_seen_at)+'</td><td class="small">'+esc((JSON.parse(x.capabilities_json||"[]")).join(","))+'</td><td>'+
-        '<button class="btn sm" onclick="toggleExec(''+esc(x.id)+'','+(x.enabled?0:1)+')">'+(x.enabled?'禁用':'启用')+'</button></td></tr>').join("")+
+        '<button class="btn sm" onclick="toggleExec(\\''+esc(x.id)+'\\','+(x.enabled?0:1)+')">'+(x.enabled?'禁用':'启用')+'</button></td></tr>').join("")+
         '</tbody></table>';
     }else if(t==="users"){
       const b=await api("/api/v1/admin/users");
@@ -213,7 +225,7 @@ async function drawAdmin(t){
     }else if(t==="orders"){
       const b=await api("/api/v1/admin/orders?limit=30");
       body.innerHTML='<table><thead><tr><th>单号</th><th>用户</th><th>商品</th><th>平台</th><th>状态</th><th>创建时间</th></tr></thead><tbody>'+
-        b.orders.map(x=>'<tr><td class="mono"><a href="javascript:void(0)" onclick="go('order',''+esc(x.id)+'')">'+esc(x.id.slice(0,8))+'</a></td><td>'+esc(x.username)+'</td><td>'+esc(x.product_code)+'</td><td>'+esc(x.platform)+'</td><td>'+badge(x.status)+'</td><td class="small">'+fmt(x.created_at)+'</td></tr>').join("")+'</tbody></table>';
+        b.orders.map(x=>'<tr><td class="mono"><a href="javascript:void(0)" onclick="go(\\'order\\',\\''+esc(x.id)+'\\')">'+esc(x.id.slice(0,8))+'</a></td><td>'+esc(x.username)+'</td><td>'+esc(x.product_code)+'</td><td>'+esc(x.platform)+'</td><td>'+badge(x.status)+'</td><td class="small">'+fmt(x.created_at)+'</td></tr>').join("")+'</tbody></table>';
     }else if(t==="tasks"){
       const b=await api("/api/v1/admin/tasks?limit=30");
       body.innerHTML='<table><thead><tr><th>任务</th><th>类型</th><th>路径</th><th>状态</th><th>尝试</th><th>错误</th><th>执行器</th><th>更新</th></tr></thead><tbody>'+
@@ -232,7 +244,7 @@ async function drawAdmin(t){
         b.products.map(x=>{let price="";try{price=(JSON.parse(x.config_json||"{}").price)||""}catch(e){}
         return '<tr><td class="mono">'+esc(x.code)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.platform)+'</td><td class="small">'+esc(x.description||"")+(price?' <span class="badge b-green">'+esc(price)+'</span>':'')+'</td><td>'+esc(x.sort_order)+'</td><td>'+
         (x.enabled?'<span class="badge b-green">在售</span>':'<span class="badge b-red">下架</span>')+'</td><td>'+
-        '<button class="btn sm" onclick="toggleProduct(''+esc(x.code)+'','+(x.enabled?0:1)+')">'+(x.enabled?'下架':'上架')+'</button></td></tr>'}).join("")+
+        '<button class="btn sm" onclick="toggleProduct(\\''+esc(x.code)+'\\','+(x.enabled?0:1)+')">'+(x.enabled?'下架':'上架')+'</button></td></tr>'}).join("")+
         '</tbody></table>';
     }else{
       const b=await api("/api/v1/admin/stats");
@@ -464,6 +476,6 @@ async function batchSubmit(){const btn=$("b-btn");btn.disabled=true;const out=$(
     catch(e){out.textContent+="FAIL "+acc+"："+e.message+"\\n"}}
   out.textContent+="\\n已受理 "+okN+"/"+lines.length+" 单";toast("批量提交完成："+okN+" 单");btn.disabled=false}
 
-boot();
+if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",()=>boot())}else{boot()}
 </script>
 </body></html>`;
