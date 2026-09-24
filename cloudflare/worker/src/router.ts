@@ -34,6 +34,14 @@ import {
   taskDetail,
 } from "./orders/order-service";
 import { downloadArtifact, presignArtifact, uploadArtifact } from "./storage/artifacts";
+import {
+  adminExecutors,
+  adminExecutorToggle,
+  adminOrders,
+  adminStats,
+  adminTasks,
+  adminUsers,
+} from "./admin/admin-service";
 import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };
@@ -104,6 +112,27 @@ export async function route(request: Request, env: Env): Promise<Response | unde
         return errorResponse(405, "METHOD_NOT_ALLOWED");
       }
       return handler(env, request);
+    }
+  }
+  // stage-cloud-31：§58 Central Admin（admin session 门控）
+  if (pathname.startsWith("/api/v1/admin/")) {
+    if (request.method !== "GET" && request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    const session = await getSessionUser(env.DB, request);
+    if (!session) return errorResponse(401, "AUTH_REQUIRED");
+    if (session.role !== "admin") return errorResponse(403, "FORBIDDEN");
+    const sub = pathname.slice("/api/v1/admin/".length);
+    // stage-cloud-11 遗留端点仍由下方原处理器处理（credentials / orders/by-account）
+    if (sub === "credentials" || sub === "orders/by-account") { /* fallthrough */ }
+    else {
+    const toggle = /^executors\/([A-Za-z0-9-]+)\/enabled$/.exec(sub);
+    if (toggle && request.method === "POST") return adminExecutorToggle(env, request, toggle[1]!);
+    if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    if (sub === "stats") return adminStats(env, request);
+    if (sub === "users") return adminUsers(env, request);
+    if (sub === "orders") return adminOrders(env, request);
+    if (sub === "tasks") return adminTasks(env, request);
+    if (sub === "executors") return adminExecutors(env, request);
+    return errorResponse(404, "NOT_FOUND");
     }
   }
   // stage-cloud-11：管理端凭据写入（admin session 门控）

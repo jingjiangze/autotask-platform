@@ -73,6 +73,7 @@ footer{padding:1.6rem 0;color:var(--mut);font-size:.8rem;text-align:center}
   <a class="nl" data-v="my" onclick="go('my')">我的订单</a>
   <a class="nl" data-v="query" onclick="go('query')">查单</a>
   <a class="nl" data-v="batch" onclick="go('batch')">批量下单</a>
+  <a class="nl" data-v="admin" id="adminNav" style="display:none" onclick="go('admin','exec')">管理</a>
   <span class="sp"></span>
   <span class="small muted" id="who"></span>
   <a class="nl" id="authBtn" onclick="go('auth')">登录 / 注册</a>
@@ -162,21 +163,64 @@ async function api(path,opt={}){opt.headers=Object.assign({"Content-Type":"appli
 function go(v,arg){location.hash="#"+v+(arg?"/"+arg:"");render(v,arg)}
 function render(v,arg){
   document.querySelectorAll(".nl[data-v]").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(v==="buy"&&a.dataset.v==="home")));
-  for(const x of["home","auth","my","order","buy","query","batch"])$("v-"+x).style.display=x===v?"":"none";
+  for(const x of["home","auth","my","order","buy","query","batch","admin"])$("v-"+x).style.display=x===v?"":"none";
   clearInterval(pollTimer);
   if(v==="home")drawHome();
   if(v==="my"){drawMy();pollTimer=setInterval(drawMy,5000)}
   if(v==="order")drawOrder(arg);if(v==="buy")drawBuy(arg);
   if(v==="query")setTimeout(()=>$("g-code").focus(),50);
   if(v==="auth"&&me)go("my");
+  if(v==="admin")drawAdmin(adminTab)
 }
 window.addEventListener("hashchange",()=>{const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])});
 
 async function boot(){try{const b=await api("/api/v1/me");me=b.user}catch(e){me=null}
   $("authBtn").style.display=me?"none":"";$("outBtn").style.display=me?"":"none";
   $("who").textContent=me?"👋 "+me.username:"未登录";
+  $("adminNav").style.display=me&&me.role==="admin"?"":"none";
   try{const p=await api("/api/v1/products");products=p.products||[]}catch(e){products=[]}
   const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])}
+
+/* ---- 管理后台（S58）---- */
+let adminTab="exec";
+function atab(t){adminTab=t;drawAdmin(t)}
+async function drawAdmin(t){
+  document.querySelectorAll("[id^=atab-]").forEach(b=>b.style.opacity=b.id==="atab-"+t?"1":".55");
+  const body=$("adminBody");
+  body.innerHTML='<table><tbody><tr><td class="muted">加载中…</td></tr></tbody></table>';
+  try{
+    if(t==="exec"){
+      const b=await api("/api/v1/admin/executors");
+      body.innerHTML='<table><thead><tr><th>ID</th><th>Path</th><th>Version</th><th>状态</th><th>最近心跳</th><th>能力</th><th></th></tr></thead><tbody>'+
+        b.executors.map(x=>'<tr><td class="mono">'+esc(x.id)+'</td><td>'+esc(x.execution_path)+'</td><td>'+esc(x.version)+'</td><td>'+
+        (x.enabled?(x.last_seen_at&&Date.now()-x.last_seen_at<120000?'<span class="badge b-green">online</span>':'<span class="badge b-gray">offline</span>'):'<span class="badge b-red">disabled</span>')+
+        '</td><td class="small">'+fmt(x.last_seen_at)+'</td><td class="small">'+esc((JSON.parse(x.capabilities_json||"[]")).join(","))+'</td><td>'+
+        '<button class="btn sm" onclick="toggleExec(''+esc(x.id)+'','+(x.enabled?0:1)+')">'+(x.enabled?'禁用':'启用')+'</button></td></tr>').join("")+
+        '</tbody></table>';
+    }else if(t==="users"){
+      const b=await api("/api/v1/admin/users");
+      body.innerHTML='<table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>注册时间</th></tr></thead><tbody>'+
+        b.users.map(x=>'<tr><td>'+esc(x.username)+'</td><td>'+esc(x.role)+'</td><td>'+esc(x.status)+'</td><td class="small">'+fmt(x.created_at)+'</td></tr>').join("")+'</tbody></table>';
+    }else if(t==="orders"){
+      const b=await api("/api/v1/admin/orders?limit=30");
+      body.innerHTML='<table><thead><tr><th>单号</th><th>用户</th><th>商品</th><th>平台</th><th>状态</th><th>创建时间</th></tr></thead><tbody>'+
+        b.orders.map(x=>'<tr><td class="mono"><a href="javascript:void(0)" onclick="go('order',''+esc(x.id)+'')">'+esc(x.id.slice(0,8))+'</a></td><td>'+esc(x.username)+'</td><td>'+esc(x.product_code)+'</td><td>'+esc(x.platform)+'</td><td>'+badge(x.status)+'</td><td class="small">'+fmt(x.created_at)+'</td></tr>').join("")+'</tbody></table>';
+    }else if(t==="tasks"){
+      const b=await api("/api/v1/admin/tasks?limit=30");
+      body.innerHTML='<table><thead><tr><th>任务</th><th>类型</th><th>路径</th><th>状态</th><th>尝试</th><th>错误</th><th>执行器</th><th>更新</th></tr></thead><tbody>'+
+        b.tasks.map(x=>'<tr><td class="mono">'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.task_type)+'</td><td>'+esc(x.execution_path)+'</td><td>'+badge(x.status)+'</td><td>'+esc(x.attempt_no)+'/'+esc(x.max_attempts)+'</td><td class="small">'+esc(x.error_code||"—")+'</td><td class="small mono">'+esc(x.executor_id||"—")+'</td><td class="small">'+fmt(x.updated_at)+'</td></tr>').join("")+'</tbody></table>';
+    }else{
+      const b=await api("/api/v1/admin/stats");
+      const st=b.stats;
+      body.innerHTML='<div class="stat-row" style="padding:16px">'+
+        [["用户",st.users],["订单",st.orders],["进行中订单",st.orders_active],["任务",st.tasks],["运行中任务",st.tasks_running],["失败任务",st.tasks_failed],["执行器",st.executors],["在线执行器",st.executors_online]]
+        .map(x=>'<div class="card col" style="align-items:center"><div class="empty-header">'+x[1]+'</div><div class="small muted">'+x[0]+'</div></div>').join("")+'</div>';
+    }
+  }catch(e){body.innerHTML='<div style="padding:16px" class="muted">加载失败：'+esc(e.message)+'</div>'}
+}
+async function toggleExec(id,enabled){
+  try{await api("/api/v1/admin/executors/"+id+"/enabled",{method:"POST",body:JSON.stringify({enabled})});toast("已"+(enabled?"启用":"禁用"));drawAdmin("exec")}
+  catch(e){toast("操作失败："+e.message)}}
 
 /* ---- 首页橱窗 ---- */
 async function drawHome(){
