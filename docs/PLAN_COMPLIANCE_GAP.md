@@ -71,3 +71,17 @@ D1 全部 11 表+3 迁移+索引（§13-29）、auth/session/legacy 兼容（§1
 | R4 | test(stage-cloud-34) | **三路真实 E2E**：两台真实机器注册跑通 15 项矩阵；无机器则如实 NOT AVAILABLE；顺带清理 E2E 残留节点 | §93-§95 |
 | R5 | feat(stage-cloud-35) | **运维化**：Windows Service 自启（§113）+ 孤儿扫描（§115）+ QR 链路（§65/§66，需真人扫码配合） |  |
 | R6 | test(stage-cloud-36) | **最终验收重审**：§136 A–G 全表重跑，达标才宣布 THREE-PATH REAL PLATFORM = PASS | 收口 |
+
+## 补救执行结果（2026-09-24 更新）
+
+| # | Commit | 状态 | 关键证据 |
+|---|---|---|---|
+| R1 | stage-cloud-31（a3abffd） | ✅ DONE | contracts/ 4 个 schema + vitest 契约一致性测试；attempt_id 三元 fencing LIVE |
+| R2 | stage-cloud-32 | ✅ DONE | worker 7 模块 + executor agent 九模块；tsc 零错 |
+| R3 | stage-cloud-33 | ✅ DONE | /api/v1/admin/* + 管理页；admin-api.spec |
+| R4 | stage-cloud-34 | ✅ DONE | exec-internal-01/external-01 上线 GitHub Actions（真实独立节点）；e2e_three_path_demo 3/3 LIVE；34 个残留节点清理；顺带修复订单终态误翻转回归 |
+| R5 | stage-cloud-35 | ✅ DONE | §115 孤儿扫描（state 端点 + pidfile）LIVE；§113 自启（exec-local-01 + 计划任务）；§12 额度守卫 |
+| R6 | stage-cloud-36（本文档 + FINAL_CLOUD_ACCEPTANCE 修订） | ✅ DONE | §136 A–G 重审：Central PASS；三路协议 PASS；Local 真实引擎 PASS；Internal/External 真实引擎 NOT AVAILABLE（ubuntu 物理约束，§132） |
+
+遗留（如实披露）：§65/§66 QR 全链路需真人扫码配合，云端下单保持"暂不支持"提示（CODE READY 部分：zhs_qr_runner 骨架）；
+Internal/External 若日后有 Windows 机器，同一 agent 代码换 token 即可跑真实引擎（零代码改动）。
