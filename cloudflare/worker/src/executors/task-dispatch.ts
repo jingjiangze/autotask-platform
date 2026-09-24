@@ -34,9 +34,11 @@ export async function mirrorTaskState(
     ]);
   } else if (["succeeded", "failed", "retry_wait"].includes(status)) {
     const finished = ["succeeded", "failed"].includes(status);
-    // stage-cloud-28：辅助任务（如 chaoxing.courses 查课）完成不终结订单 ——
+    // stage-cloud-28：辅助任务（如 chaoxing.courses 查课、demo.echo）完成不终结订单 ——
     // 订单终态只由主任务（*.run）驱动，否则查完课订单就变 succeeded 无法再入队。
-    const auxiliary = task.task_type.endsWith(".courses");
+    // stage-cloud-34 修复：白名单驱动（*.run），非 .courses 的辅助任务（demo 等）
+    // 不再误置订单终态 —— 三路 demo E2E 实测发现的回归。
+    const auxiliary = !task.task_type.endsWith(".run");
     await env.DB.batch([
       env.DB.prepare(
         "UPDATE tasks SET status=?, error_code=COALESCE(?,error_code), finished_at=COALESCE(finished_at,?), updated_at=? WHERE id=?",
