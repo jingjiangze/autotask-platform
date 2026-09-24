@@ -6,7 +6,7 @@ cd /d D:\web\_wt_stagecloud\cloudflare\executor
 for /f "usebackq tokens=1,* delims==" %%A in ("..\deploy-secrets.txt") do (
   if "%%A"=="EXECUTOR_TOKEN_LOCAL" set "EXECUTOR_TOKEN=%%B"
 )
-set "CENTRAL_URL=https://autotask.jiangjiangze.icu"
+set "CENTRAL_URL=https://executor.jiangjiangze.icu"
 set "EXECUTOR_ID=exec-local-01"
 set "EXECUTION_PATH=local"
 set "EXECUTOR_CAPABILITIES=chaoxing,zhs"

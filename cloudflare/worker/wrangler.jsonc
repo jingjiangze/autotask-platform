@@ -50,6 +50,14 @@
       "zone_name": "jiangjiangze.icu"
     },
     {
+      "pattern": "executor.jiangjiangze.icu/*",
+      "zone_name": "jiangjiangze.icu"
+    },
+    {
+      "pattern": "autotask.jiangjiangze.icu/*",
+      "zone_name": "jiangjiangze.icu"
+    },
+    {
       "pattern": "chaxun.jiangjiangze.icu/*",
       "zone_name": "jiangjiangze.icu"
     }
