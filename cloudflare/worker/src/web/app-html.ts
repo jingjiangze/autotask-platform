@@ -146,6 +146,7 @@ footer{padding:1.6rem 0;color:var(--mut);font-size:.8rem;text-align:center}
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
+let prodErr="";
 const PICON={"chaoxing":"🚀","zhs":"🌿","zhsqr":"📷"};
 const BADGE={pending:["b-yellow","排队中"],queued:["b-yellow","排队中"],processing:["b-blue","执行中"],
   leased:["b-purple","已认领"],running:["b-blue","执行中"],succeeded:["b-green","已完成"],
@@ -156,7 +157,9 @@ function fmt(t){return t?new Date(t).toLocaleString("zh-CN",{hour12:false}):"—
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
 let me=null,products=[],pollTimer=null,currentOrder=null;
 
-async function api(path,opt={}){opt.headers=Object.assign({"Content-Type":"application/json"},opt.headers||{});
+async function api(path,opt={}){
+  opt.headers=Object.assign({"Content-Type":"application/json"},opt.headers||{});
+  opt.signal=AbortSignal.timeout(12000);
   const r=await fetch(path,opt);let b={};try{b=await r.json()}catch(e){}
   if(!r.ok)throw new Error(b.error&&b.error.message?b.error.message:"HTTP "+r.status);return b}
 
@@ -178,7 +181,8 @@ async function boot(){try{const b=await api("/api/v1/me");me=b.user}catch(e){me=
   $("authBtn").style.display=me?"none":"";$("outBtn").style.display=me?"":"none";
   $("who").textContent=me?"👋 "+me.username:"未登录";
   $("adminNav").style.display=me&&me.role==="admin"?"":"none";
-  try{const p=await api("/api/v1/products");products=p.products||[]}catch(e){products=[]}
+  try{const p=await api("/api/v1/products");products=p.products||[];prodErr=""}
+  catch(e){products=[];prodErr=e&&e.message||"网络错误"}
   const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])}
 
 /* ---- 管理后台（S58）---- */
@@ -261,7 +265,8 @@ async function drawHome(){
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">'+
     '<span class="badge b-green">'+esc(price||p.platform)+'</span>'+
     '<button class="btn sm" onclick="go(\\'buy\\',\\''+esc(p.code)+'\\')">立即下单</button></div></div>'}).join("")
-    :'<div class="card col muted">暂无在售商品（管理端自助上架未开放）</div>';
+    :(prodErr?'<div class="card col muted">商品加载失败：'+esc(prodErr)+'（Access 会话过期会显示 HTTP 302，<a href="javascript:location.reload()">点此重试</a>）</div>'
+      :'<div class="card col muted">暂无在售商品（可在管理页上架）</div>');
   if(me){try{const b=await api("/api/v1/my/orders");const L=b.orders||[];
     const nAll=L.length,nDone=L.filter(o=>["succeeded","done"].includes(o.status)).length,
           nRun=L.filter(o=>["pending","processing","leased","running","retry_wait"].includes(o.status)).length;
