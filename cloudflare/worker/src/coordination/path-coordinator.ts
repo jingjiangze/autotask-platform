@@ -92,6 +92,7 @@ type CoordMessage =
   | { type: "requeue"; task_id: string }
   | { type: "cancel"; task_id: string }
   | { type: "verify-lease"; task_id: string; lease_id: string }
+  | { type: "state"; task_id: string }
   | { type: "stats" };
 
 function fail(code: string, message: string): Response {
@@ -196,6 +197,8 @@ export class PathCoordinator implements DurableObject {
       }
       case "verify-lease":
         return this.verifyLease(msg.task_id, msg.lease_id);
+      case "state":
+        return this.state(msg.task_id);
       case "stats":
         return this.stats();
       default:
@@ -476,6 +479,20 @@ export class PathCoordinator implements DurableObject {
   }
 
   /** stage-cloud-11：凭据解封前置校验 —— 租约存在、匹配、未过期且处于活跃态。 */
+  /** §115：孤儿扫描用 —— 只读任务状态（DO 调度态），供启动清理判断。 */
+  private async state(taskId: string): Promise<Response> {
+    const t = await this.getTask(taskId);
+    if (!t) return Response.json({ ok: true, found: false });
+    return Response.json({
+      ok: true,
+      found: true,
+      status: t.status,
+      executor_id: t.executor_id,
+      lease_id: t.lease_id,
+      lease_expires_at: t.lease_expires_at,
+    });
+  }
+
   private async verifyLease(taskId: string, leaseId: string): Promise<Response> {
     const t = await this.getTask(taskId);
     if (!t || t.lease_id !== leaseId) {

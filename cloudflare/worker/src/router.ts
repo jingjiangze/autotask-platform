@@ -20,6 +20,7 @@ import {
   executorComplete,
   executorFail,
   executorHeartbeat,
+  executorTaskState,
 } from "./executors/executor-api";
 import { ERROR_CODES, errorResponse, type ErrorCode } from "./errors";
 import { getSessionUser } from "./auth/session-service";
@@ -105,6 +106,11 @@ export async function route(request: Request, env: Env): Promise<Response | unde
       });
       const handler = verb === "start" ? executorAck : verb === "fail" ? executorFail : verb === "cancel-ack" ? executorCancelAck : executorComplete;
       return handler(env, inner);
+    }
+    // §115：孤儿扫描用任务状态只读查询（GET + query 传参）
+    const stateRoute = /^tasks\/([A-Za-z0-9-]+)\/state$/.exec(action);
+    if (stateRoute && request.method === "GET") {
+      return executorTaskState(env, request, stateRoute[1]!);
     }
     const handler = executorPull[action];
     if (handler) {
