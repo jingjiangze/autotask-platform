@@ -209,6 +209,22 @@ async function drawAdmin(t){
       const b=await api("/api/v1/admin/tasks?limit=30");
       body.innerHTML='<table><thead><tr><th>任务</th><th>类型</th><th>路径</th><th>状态</th><th>尝试</th><th>错误</th><th>执行器</th><th>更新</th></tr></thead><tbody>'+
         b.tasks.map(x=>'<tr><td class="mono">'+esc(x.id.slice(0,8))+'</td><td>'+esc(x.task_type)+'</td><td>'+esc(x.execution_path)+'</td><td>'+badge(x.status)+'</td><td>'+esc(x.attempt_no)+'/'+esc(x.max_attempts)+'</td><td class="small">'+esc(x.error_code||"—")+'</td><td class="small mono">'+esc(x.executor_id||"—")+'</td><td class="small">'+fmt(x.updated_at)+'</td></tr>').join("")+'</tbody></table>';
+    }else if(t==="products"){
+      const b=await api("/api/v1/admin/products");
+      body.innerHTML='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:end;padding:12px 12px 0">'+
+        '<label class="small muted">编号<br><input id="p-code" class="ipt" placeholder="cx_video" style="width:110px"></label>'+
+        '<label class="small muted">名称<br><input id="p-name" class="ipt" placeholder="学习通视频" style="width:130px"></label>'+
+        '<label class="small muted">平台<br><select id="p-platform" class="ipt" style="width:110px"><option>chaoxing</option><option>zhs</option><option>zhsqr</option></select></label>'+
+        '<label class="small muted">描述<br><input id="p-desc" class="ipt" placeholder="测试免费" style="width:180px"></label>'+
+        '<label class="small muted">排序<br><input id="p-sort" class="ipt" type="number" value="0" style="width:60px"></label>'+
+        '<label class="small muted">价格文本<br><input id="p-price" class="ipt" placeholder="测试免费" style="width:90px"></label>'+
+        '<button class="btn sm" onclick="upsertProduct()">上架 / 更新</button></div>'+
+        '<table style="margin-top:10px"><thead><tr><th>编号</th><th>名称</th><th>平台</th><th>描述</th><th>排序</th><th>状态</th><th></th></tr></thead><tbody>'+
+        b.products.map(x=>{let price="";try{price=(JSON.parse(x.config_json||"{}").price)||""}catch(e){}
+        return '<tr><td class="mono">'+esc(x.code)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.platform)+'</td><td class="small">'+esc(x.description||"")+(price?' <span class="badge b-green">'+esc(price)+'</span>':'')+'</td><td>'+esc(x.sort_order)+'</td><td>'+
+        (x.enabled?'<span class="badge b-green">在售</span>':'<span class="badge b-red">下架</span>')+'</td><td>'+
+        '<button class="btn sm" onclick="toggleProduct(''+esc(x.code)+'','+(x.enabled?0:1)+')">'+(x.enabled?'下架':'上架')+'</button></td></tr>'}).join("")+
+        '</tbody></table>';
     }else{
       const b=await api("/api/v1/admin/stats");
       const st=b.stats;
@@ -221,6 +237,19 @@ async function drawAdmin(t){
 async function toggleExec(id,enabled){
   try{await api("/api/v1/admin/executors/"+id+"/enabled",{method:"POST",body:JSON.stringify({enabled})});toast("已"+(enabled?"启用":"禁用"));drawAdmin("exec")}
   catch(e){toast("操作失败："+e.message)}}
+async function toggleProduct(code,enabled){
+  try{await api("/api/v1/admin/products/"+code+"/enabled",{method:"POST",body:JSON.stringify({enabled})});toast("已"+(enabled?"上架":"下架"));drawAdmin("products");try{const p=await api("/api/v1/products");products=p.products||[]}catch(e){}}
+  catch(e){toast("操作失败："+e.message)}}
+async function upsertProduct(){
+  const code=$("p-code").value.trim(),name=$("p-name").value.trim();
+  if(!code||!name){toast("编号与名称必填");return}
+  let cfg={};const price=$("p-price").value.trim();if(price)cfg.price=price;
+  try{await api("/api/v1/admin/products",{method:"POST",body:JSON.stringify({
+    code,name,platform:$("p-platform").value,description:$("p-desc").value.trim(),
+    sort_order:Number($("p-sort").value)||0,config_json:JSON.stringify(cfg)})});
+    toast("已上架/更新");drawAdmin("products");
+    try{const p=await api("/api/v1/products");products=p.products||[]}catch(e){}}
+  catch(e){toast("失败："+e.message)}}
 
 /* ---- 首页橱窗 ---- */
 async function drawHome(){

@@ -141,3 +141,88 @@ export async function adminExecutorToggle(env: Env, request: Request, executorId
     .run();
   return ok({ executor_id: executorId, enabled });
 }
+
+/* ---- stage-cloud-37 — §58 商品上架管理 ---- */
+
+/** §58 商品列表：全字段（products 无敏感列）。 */
+export async function adminProducts(env: Env, _request: Request): Promise<Response> {
+  const rows = await env.DB.prepare(
+    "SELECT id, code, name, description, platform, enabled, sort_order, config_json, created_at, updated_at FROM products ORDER BY sort_order, created_at DESC LIMIT 200",
+  ).all();
+  return ok({ products: rows.results });
+}
+
+const PRODUCT_PLATFORMS = ["chaoxing", "zhs", "zhsqr"];
+
+/** §58 商品上架/编辑：按 code 幂等 upsert；写 PRODUCT_UPSERTED 审计。 */
+export async function adminProductUpsert(env: Env, request: Request): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return errorResponse(400, "VALIDATION_FAILED");
+  }
+  const code = String(body["code"] ?? "").trim().toLowerCase();
+  const name = String(body["name"] ?? "").trim();
+  const platform = String(body["platform"] ?? "").trim().toLowerCase();
+  const description = String(body["description"] ?? "").trim();
+  const sortOrder = Number.isInteger(body["sort_order"]) ? (body["sort_order"] as number) : 0;
+  let configJson = "{}";
+  if (body["config_json"] !== undefined) {
+    try {
+      configJson = JSON.stringify(JSON.parse(String(body["config_json"])));
+    } catch {
+      return errorResponse(400, "VALIDATION_FAILED");
+    }
+  }
+  if (!/^[a-z0-9_-]{2,32}$/.test(code) || !name || !PRODUCT_PLATFORMS.includes(platform)) {
+    return errorResponse(400, "VALIDATION_FAILED");
+  }
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO products(id,code,name,description,platform,enabled,sort_order,config_json,created_at,updated_at)
+     VALUES(?,?,?,?,?,1,?,?,?,?)
+     ON CONFLICT(code) DO UPDATE SET name=excluded.name, description=excluded.description,
+       platform=excluded.platform, sort_order=excluded.sort_order, config_json=excluded.config_json, updated_at=excluded.updated_at`,
+  )
+    .bind(`prod-${code}`, code, name, description, platform, sortOrder, configJson, now, now)
+    .run();
+  const session = await import("../auth/session-service").then((m) => m.getSessionUser(env.DB, request));
+  await env.DB.prepare(
+    "INSERT INTO audit_events(id,actor_type,actor_id,event_type,entity_type,entity_id,created_at) VALUES(?,?,?,?,?,?,?)",
+  )
+    .bind(crypto.randomUUID(), "admin", session?.id ?? null, "PRODUCT_UPSERTED", "product", code, now)
+    .run();
+  return ok({ code, name, platform, enabled: 1 });
+}
+
+/** §58 上架/下架（下架后前台橱窗与下单立即不可见），写审计。 */
+export async function adminProductToggle(env: Env, request: Request, code: string): Promise<Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return errorResponse(400, "VALIDATION_FAILED");
+  }
+  const enabled = body["enabled"];
+  if (enabled !== 0 && enabled !== 1) return errorResponse(400, "VALIDATION_FAILED");
+  const res = await env.DB.prepare("UPDATE products SET enabled=?, updated_at=? WHERE code=?")
+    .bind(enabled, Date.now(), code)
+    .run();
+  if (!res.meta.changes) return errorResponse(404, "NOT_FOUND");
+  const session = await import("../auth/session-service").then((m) => m.getSessionUser(env.DB, request));
+  await env.DB.prepare(
+    "INSERT INTO audit_events(id,actor_type,actor_id,event_type,entity_type,entity_id,created_at) VALUES(?,?,?,?,?,?,?)",
+  )
+    .bind(
+      crypto.randomUUID(),
+      "admin",
+      session?.id ?? null,
+      enabled ? "PRODUCT_ENABLED" : "PRODUCT_DISABLED",
+      "product",
+      code,
+      Date.now(),
+    )
+    .run();
+  return ok({ code, enabled });
+}
