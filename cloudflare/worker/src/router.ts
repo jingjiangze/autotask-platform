@@ -47,6 +47,7 @@ import {
   adminUsers,
 } from "./admin/admin-service";
 import { adminImportLegacy } from "./admin/import-legacy";
+import { orderQrStart } from "./orders/order-qr";
 import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };
@@ -191,6 +192,12 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     const oid = pathname.slice("/api/v1/orders/".length, -"/tasks".length);
     if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
     return createOrderTask(env, request, oid);
+  }
+  // stage-cloud-42：知到扫码下单（qr/start）
+  const qrStartMatch = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)\/qr\/start$/.exec(pathname);
+  if (qrStartMatch) {
+    if (request.method !== "POST") return errorResponse(405, "METHOD_NOT_ALLOWED");
+    return orderQrStart(env, request, qrStartMatch[1]!);
   }
   // stage-cloud-28：订单控制 / 凭据明文查看 / 查课表
   const orderSub = /^\/api\/v1\/orders\/([A-Za-z0-9_-]+)\/(control|credentials|query-courses)$/.exec(
