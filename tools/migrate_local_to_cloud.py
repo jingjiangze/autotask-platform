@@ -99,6 +99,8 @@ def main() -> int:
                     help="云 enc-v2 主密钥（base64 32B）")
     ap.add_argument("--secret-file", default=r"D:\web\secrets_store\secret_key.txt",
                     help="本地 enc:v1 的 SECRET 文件（order_platform._SECRET_FILE）")
+    ap.add_argument("--admin-user", default=os.environ.get("ADMIN_USER", "real_owner"))
+    ap.add_argument("--admin-pass", default=os.environ.get("ADMIN_PASS", ""))
     args = ap.parse_args()
 
     if not Path(args.db).exists():
@@ -159,19 +161,112 @@ def main() -> int:
         return 2
     base = args.execute_url.rstrip("/")
 
-    migrated_orders = 0
-    skipped_orders = 0
+    if not args.admin_pass:
+        print("apply needs --admin-pass (or env ADMIN_PASS)")
+        return 2
+
+    # admin session
+    try:
+        req = urllib.request.Request(f"{base}/api/v1/auth/login", method="POST",
+            data=json.dumps({"username": args.admin_user, "password": args.admin_pass}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "autotask-migrate/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            cookie = r.headers.get("Set-Cookie", "").split(";")[0]
+    except urllib.error.HTTPError as e:
+        print(f"admin login failed: {e.code}")
+        return 2
+    if not cookie:
+        print("admin login failed: no cookie")
+        return 2
+
+    def post_import(payload):
+        req = urllib.request.Request(f"{base}/api/v1/admin/import/legacy", method="POST",
+            data=json.dumps(payload, ensure_ascii=False).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "autotask-migrate/1.0",
+                     "Cookie": cookie})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            return {"error": f"{e.code}: {e.read().decode()[:200]}"}
+
+    # ---- enc:v1 -> enc:v2 本地重加密 ----
+    secret = _load_local_secret(args.secret_file)
+    def _b64norm(v: str) -> bytes:
+        v = v.strip().replace("-", "+").replace("_", "/")
+        v += "=" * (-len(v) % 4)
+        return base64.b64decode(v)
+    key = _b64norm(args.credential_key) if args.credential_key else None
+    if key is None or len(key) != 32:
+        print("need valid --credential-key (base64 32B)")
+        return 2
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    def encrypt_v2(plaintext: str) -> str:
+        nonce = os.urandom(12)
+        ct = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), b"autotask.order_credentials.v2")
+        return "enc-v2$" + base64.b64encode(nonce).decode() + "$" + base64.b64encode(ct).decode()
+
+    # 本地 product code 映射（platform -> code）
+    platform_code = {p["platform"]: p["code"] for p in products}
+
+    payload = {
+        "users": [{"id": u["id"], "username": u["username"], "pw_hash": u["pw_hash"],
+                    "is_admin": u["is_admin"], "created_at": u["created_at"]} for u in users],
+        "orders": [],
+        "credentials": [],
+    }
+    cred_fail = 0
     for o in orders:
-        # 幂等：cloud 订单 id = 本地 id；已存在则跳过
-        st, existing = call(base, "GET", f"/api/v1/orders/{o['id']}")
-        if st == 200:
-            skipped_orders += 1
+        payload["orders"].append({
+            "id": o["id"], "user_id": o["user_id"], "platform": o["platform"],
+            "account": o["account"] or "", "courses": o["courses"] or "",
+            "status": o["status"], "created_at": o["created_at"],
+        })
+        pw = o["password"] or ""
+        if pw:
+            try:
+                pt = decrypt_local_v1(pw, secret) if pw.startswith("enc:v1:") else pw
+                payload["credentials"].append({
+                    "order_id": o["id"], "credential_type": "account_password",
+                    "ciphertext": encrypt_v2(pt), "encryption_version": "enc-v2",
+                })
+                if (o["account"] or ""):
+                    payload["credentials"].append({
+                        "order_id": o["id"], "credential_type": "account",
+                        "ciphertext": encrypt_v2(o["account"]), "encryption_version": "enc-v2",
+                    })
+            except Exception as e:  # noqa: BLE001
+                cred_fail += 1
+                errors.append(f"cred {o['id']}: {type(e).__name__}")
+
+    # 分批（每批 50 单）
+    result = {"users": {}, "orders": {}, "credentials": {}}
+    B = 50
+    for i in range(0, len(payload["orders"]), B):
+        batch = {"users": payload["users"] if i == 0 else [],
+                 "orders": payload["orders"][i:i + B],
+                 "credentials": payload["credentials"][i:i + B * 2]}
+        r = post_import(batch)
+        if "error" in r:
+            errors.append(f"batch {i}: {r['error']}")
             continue
-        errors.append(f"order {o['id']}: needs admin import API (not yet implemented)")
-    print(f"orders migrated={migrated_orders} skipped(existing)={skipped_orders} errors={len(errors)}")
-    for e in errors[:5]:
+        for k in ("users", "orders", "credentials"):
+            for kk, vv in r.get(k, {}).items():
+                if isinstance(vv, int):
+                    result[k][kk] = result[k].get(kk, 0) + vv
+        order_errs = r.get("orders", {}).get("errors") or []
+        errors.extend(f"order {e}" for e in order_errs)
+
+    migrated_orders = result["orders"].get("imported", 0)
+    skipped_orders = result["orders"].get("skipped", 0)
+    print(f"users imported={result['users'].get('imported', 0)} skipped={result['users'].get('skipped', 0)}")
+    print(f"orders migrated={migrated_orders} skipped(existing)={skipped_orders}")
+    print(f"credentials imported={result['credentials'].get('imported', 0)} decrypt_fail={cred_fail}")
+    print(f"errors={len(errors)}")
+    for e in errors[:8]:
         print(f"  - {e}")
-    return 0
+    return 0 if not errors else 1
 
 
 if __name__ == "__main__":

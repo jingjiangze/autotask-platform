@@ -1,20 +1,19 @@
-// stage-cloud-03 bootstrap：Cloudflare 中央控制面骨架
-// 本阶段仅实现 GET /health（计划 §77）；D1/R2/DO 绑定在后续 stage 逐个加入。
 {
   "name": "autotask-central",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
-  // 测试与后续 migration 读取需要 node 兼容模块（vitest-plugin known-issues）
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
     "enabled": true
   },
-  // stage-cloud-24：每分钟 Cron（过期会话清理），占用 Free 限额 1/5
   "triggers": {
-    "crons": ["*/1 * * * *", "0 * * * *"]
+    "crons": [
+      "*/1 * * * *",
+      "0 * * * *"
+    ]
   },
-  // stage-cloud-04：D1 = 唯一业务数据源（计划 §6）。
-  // database_id 为本地占位；真实部署（wrangler d1 create）后替换。
   "d1_databases": [
     {
       "binding": "DB",
@@ -23,15 +22,12 @@
       "migrations_dir": "migrations"
     }
   ],
-  // stage-cloud-14：R2 工件桶 —— R2 已于 2026-09-22 开通，恢复绑定
   "r2_buckets": [
     {
       "binding": "ARTIFACTS",
       "bucket_name": "autotask-artifacts"
     }
   ],
-  // stage-cloud-09：PathCoordinator —— 每 execution_path 一个实例（idFromName(path)）。
-  // SQLite-backed DO（Free 计划可用）；LEASE_TTL_MS / RETRY_DELAY_MS 可用 vars 调。
   "durable_objects": {
     "bindings": [
       {
@@ -43,7 +39,19 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["PathCoordinator"]
+      "new_sqlite_classes": [
+        "PathCoordinator"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "order.jiangjiangze.icu/*",
+      "zone_name": "jiangjiangze.icu"
+    },
+    {
+      "pattern": "chaxun.jiangjiangze.icu/*",
+      "zone_name": "jiangjiangze.icu"
     }
   ]
 }

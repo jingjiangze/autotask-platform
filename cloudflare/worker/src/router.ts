@@ -46,6 +46,7 @@ import {
   adminTasks,
   adminUsers,
 } from "./admin/admin-service";
+import { adminImportLegacy } from "./admin/import-legacy";
 import { orderControl, orderCredentialsView, orderQueryCourses } from "./orders/order-control";
 
 export { ERROR_CODES, errorResponse };
@@ -143,6 +144,8 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     }
     const toggle = /^executors\/([A-Za-z0-9-]+)\/enabled$/.exec(sub);
     if (toggle && request.method === "POST") return adminExecutorToggle(env, request, toggle[1]!);
+    // §102：本地平台一次性导入（POST）
+    if (sub === "import/legacy" && request.method === "POST") return adminImportLegacy(env, request);
     if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
     if (sub === "stats") return adminStats(env, request);
     if (sub === "users") return adminUsers(env, request);
