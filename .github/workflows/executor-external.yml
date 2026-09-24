@@ -1,0 +1,28 @@
+# stage-cloud-34 — External Executor 真实服务（plan §64/§92/§93）
+# outbound-only（§4）：与 internal 相同 Agent 代码，仅 EXECUTION_PATH 不同；
+# 路径隔离由中央 DO 强制（跨路径 claim 403，§57/§60）。与 internal 错峰。
+name: executor-external
+on:
+  schedule:
+    - cron: "37 1-23/2 * * *"  # 与 internal 错峰 30 分钟
+  workflow_dispatch: {}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run external executor
+        working-directory: cloudflare/executor
+        run: |
+          export CENTRAL_URL="${{ secrets.CENTRAL_URL }}"
+          export EXECUTOR_ID="exec-external-01"
+          export EXECUTION_PATH="external"
+          export EXECUTOR_TOKEN="${{ secrets.EXECUTOR_TOKEN_EXTERNAL }}"
+          export EXECUTOR_CAPABILITIES="demo"
+          export POLL_INTERVAL_S="10"
+          export HEARTBEAT_INTERVAL_S="25"
+          timeout 1200 python agent/main.py --runner demo || true
