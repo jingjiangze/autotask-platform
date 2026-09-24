@@ -40,7 +40,22 @@ export default {
   },
 
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
+
+    // stage-cloud-38b — 站点收敛：order.jiangjiangze.icu 是唯一用户入口。
+    // autotask（执行器/admin API 基地址）与 chaxun 的浏览器 UI 访问 → 302 到 order；
+    // /api/*、/health、非 HTML 请求（执行器/脚本/E2E）原样处理，不受影响。
+    const host = url.hostname;
+    if (
+      host !== "order.jiangjiangze.icu" &&
+      request.method === "GET" &&
+      !pathname.startsWith("/api/") &&
+      pathname !== "/health" &&
+      (request.headers.get("Accept") ?? "").includes("text/html")
+    ) {
+      return Response.redirect("https://order.jiangjiangze.icu/", 302);
+    }
 
     if (pathname === "/health") {
       if (request.method !== "GET") {
