@@ -65,7 +65,7 @@ def run_path(base: str, cookie: str, oid: str, path: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="https://autotask.jiangjiangze.icu")
+    ap.add_argument("--base", default="https://executor.jiangjiangze.icu")
     args = ap.parse_args()
     base = args.base
 

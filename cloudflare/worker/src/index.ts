@@ -43,10 +43,19 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // stage-cloud-38b — 站点收敛：order.jiangjiangze.icu 是唯一用户入口。
-    // autotask（执行器/admin API 基地址）与 chaxun 的浏览器 UI 访问 → 302 到 order；
-    // /api/*、/health、非 HTML 请求（执行器/脚本/E2E）原样处理，不受影响。
+    // stage-cloud-39 — autotask / chaxun 域名退役（§ 用户指令）：一律 410 Gone。
+    // 执行器 API 基地址已迁至 api.jiangjiangze.icu（无 Access，机器流量专用）。
     const host = url.hostname;
+    if (host === "autotask.jiangjiangze.icu" || host === "chaxun.jiangjiangze.icu") {
+      return Response.json(
+        { ok: false, error: { code: "DOMAIN_RETIRED", message: "This domain is retired. Use https://order.jiangjiangze.icu (UI) or https://executor.jiangjiangze.icu (executor API)." } },
+        { status: 410 },
+      );
+    }
+
+    // stage-cloud-38b — 站点收敛：order.jiangjiangze.icu 是唯一用户入口。
+    // 残余未知主机（如 api 域名上的浏览器 UI 访问）→ 302 到 order；
+    // /api/*、/health、非 HTML 请求（执行器/脚本/E2E）原样处理，不受影响。
     if (
       host !== "order.jiangjiangze.icu" &&
       request.method === "GET" &&
