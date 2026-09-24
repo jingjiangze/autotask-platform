@@ -141,5 +141,52 @@ class TestExecutorRuntime(unittest.TestCase):
         self.assertEqual(completes[-1]["error_code"], "EXECUTOR_CRASH")
 
 
+
+
+class TestOrphanScan(unittest.TestCase):
+    """§115：孤儿扫描决策与扫描循环（stage-cloud-35）。"""
+
+    def test_decide_cleanup_rules(self):
+        from agent.cleanup import decide_cleanup
+        now = 1000.0
+        self.assertEqual(decide_cleanup(None, "me", now), "keep")  # 中央不可达
+        self.assertEqual(decide_cleanup({"found": False}, "me", now), "delete")
+        self.assertEqual(decide_cleanup({"found": True, "status": "succeeded"}, "me", now), "delete")
+        self.assertEqual(decide_cleanup({"found": True, "status": "canceled"}, "me", now), "delete")
+        # 在跑 + 本人 + 租约有效 → keep
+        self.assertEqual(decide_cleanup({"found": True, "status": "running",
+                                         "executor_id": "me", "lease_expires_at": 2000}, "me", now), "keep")
+        # 在跑 + 租约过期 → kill+delete
+        self.assertEqual(decide_cleanup({"found": True, "status": "running",
+                                         "executor_id": "me", "lease_expires_at": 500}, "me", now), "kill+delete")
+        # 在跑 + 他人 → kill+delete
+        self.assertEqual(decide_cleanup({"found": True, "status": "running",
+                                         "executor_id": "other", "lease_expires_at": 2000}, "me", now), "kill+delete")
+
+    def test_scan_orphans_fs(self):
+        import tempfile
+        from pathlib import Path as P
+        from agent.cleanup import scan_orphans
+        with tempfile.TemporaryDirectory() as td:
+            root = P(td)
+            (root / "task-gone").mkdir()
+            (root / "task-done").mkdir()
+            states = {
+                "task-gone": {"found": False},
+                "task-done": {"found": True, "status": "succeeded"},
+            }
+
+            class FakeClient:
+                executor_id = "me"
+
+                def task_state(self, tid):
+                    return states.get(tid)  # 未知目录 → None → keep
+
+            rep = scan_orphans(FakeClient(), root, "me")
+            self.assertEqual(rep["checked"], 2)
+            self.assertEqual(sorted(rep["deleted"]), ["task-done", "task-gone"])
+            self.assertFalse((root / "task-gone").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -282,3 +282,24 @@ export async function executorBootstrap(
     cookies: null,
   });
 }
+
+/**
+ * stage-cloud-35 — §115：任务状态只读查询（孤儿扫描用）。
+ * GET tasks/{id}/state?executor_id=&execution_path=（query 传参，GET 无 body）。
+ */
+export async function executorTaskState(
+  env: Env,
+  request: Request,
+  taskId: string,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const executorId = url.searchParams.get("executor_id") ?? "";
+  const executionPath = url.searchParams.get("execution_path") ?? "";
+  if (!executorId || !executionPath) return errorResponse(400, "VALIDATION_FAILED");
+  const auth = await authenticateExecutor(env, request, {
+    executor_id: executorId,
+    execution_path: executionPath,
+  });
+  if ("code" in auth) return errorResponse(auth.status, auth.code);
+  return coordinator(env, executionPath, { type: "state", task_id: taskId });
+}

@@ -179,6 +179,17 @@ def main() -> int:  # pragma: no cover - 常驻入口
     else:
         runtime.register_handler("demo.echo", lambda p, ctx: {"echo": p})
 
+    # §115：启动孤儿扫描 —— 中央终态/无主/租约过期的残留任务目录按策略清理
+    try:
+        from agent.cleanup import scan_orphans
+        from runners.chaoxing_runner import TASK_ROOT
+        rep = scan_orphans(client, TASK_ROOT, client.executor_id)
+        if rep["checked"]:
+            print(f"[orphan-scan] checked={rep['checked']} deleted={len(rep['deleted'])} "
+                  f"killed={len(rep['killed'])} kept={len(rep['kept'])}", flush=True)
+    except Exception as e:  # noqa: BLE001 —— 扫描失败不阻塞常驻主循环
+        print(f"[orphan-scan] skipped: {e}", flush=True)
+
     try:
         client.node_heartbeat()  # 节点级心跳（§41：version/capacity/active_tasks）
     except OSError:

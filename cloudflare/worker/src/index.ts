@@ -8,6 +8,7 @@
 import type { Env } from "./auth/auth-service";
 import { errorResponse } from "./errors";
 import { route } from "./router";
+import { checkQuota } from "./tasks/quota-service";
 import { PathCoordinator } from "./coordination/path-coordinator";
 import { APP_HTML } from "./web/app-html";
 
@@ -30,6 +31,12 @@ export default {
         .bind(Date.now() - 24 * 3600 * 1000, Date.now() - 24 * 3600 * 1000)
         .run(),
     );
+    // stage-cloud-35 — §12：额度守卫每小时整点跑一次（cron 本身每分钟）
+    if (_controller.cron === "0 * * * *") {
+      ctx.waitUntil(
+        checkQuota(env).catch(() => undefined),
+      );
+    }
   },
 
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {

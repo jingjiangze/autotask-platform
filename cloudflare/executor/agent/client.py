@@ -199,6 +199,33 @@ class CentralClient:
             raise RuntimeError(f"artifact upload failed: {status} {body}")
         return body
 
+    def _get(self, path: str, query: dict[str, str] | None = None) -> tuple[int, Any]:
+        url = f"{self.base_url}{path}"
+        if query:
+            from urllib.parse import urlencode
+            url += "?" + urlencode(query)
+        headers = {"User-Agent": "autotask-executor/1.0"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = resp.read()
+                return resp.status, (json.loads(data) if data else {})
+        except urllib.error.HTTPError as e:
+            return e.code, {}
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return 0, {}
+
+    def task_state(self, task_id: str) -> dict[str, Any] | None:
+        """§115：只读任务状态（孤儿扫描用）。网络失败返回 None（fail-safe 保留现场）。"""
+        status, body = self._get(f"/api/executor/v1/tasks/{task_id}/state",
+                                 query={"executor_id": self.executor_id,
+                                        "execution_path": self.execution_path})
+        if status != 200:
+            return None
+        return body
+
     def node_heartbeat(self) -> dict[str, Any]:
         status, body = self._post("/api/executor/v1/node-heartbeat",
                                   self._ctx("", "") | {"version": self.version,
