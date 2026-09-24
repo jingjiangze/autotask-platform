@@ -142,7 +142,7 @@ footer{padding:1.6rem 0;color:var(--mut);font-size:.8rem;text-align:center}
 </div>
 
 </div>
-<footer>自动任务平台 · 仅供个人本地测试与学习研究使用 · 不提供对外服务 · 进度数据仅供参考，一切以学习平台官方为准 · 使用即视为知悉并接受全部免责条款</footer>
+<footer>自动任务平台 b391 · 仅供个人本地测试与学习研究使用 · 不提供对外服务 · 进度数据仅供参考，一切以学习平台官方为准 · 使用即视为知悉并接受全部免责条款</footer>
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
@@ -152,15 +152,20 @@ const BADGE={pending:["b-yellow","排队中"],queued:["b-yellow","排队中"],pr
   leased:["b-purple","已认领"],running:["b-blue","执行中"],succeeded:["b-green","已完成"],
   done:["b-green","已完成"],failed:["b-red","失败"],canceled:["b-gray","已取消"],retry_wait:["b-orange","等待重试"]};
 function badge(s){const b=BADGE[s]||["b-gray",s];return '<span class="badge '+b[0]+'">'+b[1]+'</span>'}
-function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmt(t){return t?new Date(t).toLocaleString("zh-CN",{hour12:false}):"—"}
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
 let me=null,products=[],pollTimer=null,currentOrder=null;
 
 async function api(path,opt={}){
   opt.headers=Object.assign({"Content-Type":"application/json"},opt.headers||{});
-  opt.signal=AbortSignal.timeout(12000);
-  const r=await fetch(path,opt);let b={};try{b=await r.json()}catch(e){}
+  let r;
+  if(typeof AbortController!=="undefined"){
+    const c=new AbortController();const t=setTimeout(function(){c.abort()},12000);
+    opt.signal=c.signal;
+    try{r=await fetch(path,opt)}finally{clearTimeout(t)}
+  }else{r=await fetch(path,opt)}
+  let b={};try{b=await r.json()}catch(e){}
   if(!r.ok)throw new Error(b.error&&b.error.message?b.error.message:"HTTP "+r.status);return b}
 
 function go(v,arg){location.hash="#"+v+(arg?"/"+arg:"");render(v,arg)}
@@ -182,7 +187,7 @@ async function boot(){try{const b=await api("/api/v1/me");me=b.user}catch(e){me=
   $("who").textContent=me?"👋 "+me.username:"未登录";
   $("adminNav").style.display=me&&me.role==="admin"?"":"none";
   try{const p=await api("/api/v1/products");products=p.products||[];prodErr=""}
-  catch(e){products=[];prodErr=e&&e.message||"网络错误"}
+  catch(e){products=[];prodErr=(e&&e.name==="AbortError")?"请求超时(12s)":(e&&e.message||"网络错误")}
   const parts=(location.hash.slice(1)||"home").split("/");render(parts[0],parts[1])}
 
 /* ---- 管理后台（S58）---- */
@@ -331,7 +336,7 @@ async function queryCourses(code){
     stat.textContent="查询到 "+buyCourses.length+" 门课程（订单 "+o.order_id.slice(0,8)+" 已创建，勾选后提交即入队）";
     $("bw-courses").innerHTML=buyCourses.length?'<label>勾选要刷的课程</label><div class="card sm" style="max-height:280px;overflow:auto">'+
       buyCourses.map((c,i)=>'<div style="padding:4px 2px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--tx)">'+
-      '<input type="checkbox" class="bw-c" style="width:auto" value="'+esc(String(c.id??c.course_id??c))+'"'+(i===0?" checked":"")+'> '+esc(c.name??c.title??String(c))+'</label></div>').join("")+'</div>'
+      '<input type="checkbox" class="bw-c" style="width:auto" value="'+esc(String(c.id!=null?c.id:(c.course_id!=null?c.course_id:c)))+'"'+(i===0?" checked":"")+'> '+esc(c.name!=null?c.name:(c.title!=null?c.title:String(c)))+'</label></div>').join("")+'</div>'
       :'<p class="small muted">课程列表为空（可能全部已完成）</p>';
   }catch(e){stat.textContent="查询失败："+e.message}
 }
