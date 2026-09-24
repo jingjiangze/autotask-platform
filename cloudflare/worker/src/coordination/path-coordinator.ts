@@ -20,6 +20,7 @@ import {
   type TaskStatus,
 } from "../types/protocol";
 import { transitionTask } from "../tasks/task-state";
+import { backoffForAttempt } from "../tasks/retry-service";
 
 // §44/§101：lease 120s + heartbeat 30s（Cloudflare Free 预算内默认节奏）
 export const DEFAULT_LEASE_TTL_MS = 120 * 1000;
@@ -128,6 +129,12 @@ export class PathCoordinator implements DurableObject {
   private retryDelay(): number {
     const n = Number(this.env["RETRY_DELAY_MS"]);
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_RETRY_DELAY_MS;
+  }
+
+  /** §53：固定 env 优先；未配置时按 attempt 指数退避+jitter。 */
+  private retryDelayFor(attemptNo: number): number {
+    if (this.env["RETRY_DELAY_MS"]) return this.retryDelay();
+    return backoffForAttempt(attemptNo);
   }
 
   private async getTask(taskId: string): Promise<QueueTask | null> {
@@ -374,7 +381,7 @@ export class PathCoordinator implements DurableObject {
           attempt_no: t.attempt_no,
         });
       }
-      t.retry_at = Date.now() + this.retryDelay();
+      t.retry_at = Date.now() + this.retryDelayFor(t.attempt_no);
       await this.putTask(t);
       await this.scheduleAlarm(t.retry_at);
     } else {

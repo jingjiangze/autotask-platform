@@ -20,11 +20,9 @@ export interface SessionUserRow {
   expires_at: number;
 }
 
-export function sha256Hex(input: string): Promise<string> {
-  return crypto.subtle
-    .digest("SHA-256", new TextEncoder().encode(input))
-    .then((buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join(""));
-}
+// stage-cloud-31：统一哈希实现拆至 crypto/hashing（§71）；保留再导出兼容既有 import
+import { sha256Hex } from "../crypto/hashing";
+export { sha256Hex };
 
 export function parseCookies(request: Request): Record<string, string> {
   const out: Record<string, string> = {};

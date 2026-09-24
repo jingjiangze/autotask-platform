@@ -12,7 +12,10 @@ import {
   EXECUTION_PATHS,
   type ExecutionPath,
 } from "../types/protocol";
-import { sha256Hex } from "../auth/session-service";
+import { sha256Hex } from "../crypto/hashing";
+
+// stage-cloud-31：注册流拆至 executor-service（§71）；保留再导出兼容 router
+export { registerExecutor } from "./executor-service";
 import { errorResponse, type ErrorCode } from "../errors";
 
 const EXECUTOR_ID_RE = /^exec-[a-z0-9-]{2,32}$/;
@@ -56,72 +59,6 @@ async function audit(
   )
     .bind(crypto.randomUUID(), "executor", actorId, eventType, "executor", entityId, Date.now())
     .run();
-}
-
-export async function registerExecutor(env: Env, request: Request): Promise<Response> {
-  const bootstrap = env.EXECUTOR_BOOTSTRAP_TOKEN;
-  if (!bootstrap) {
-    return bad(503, "BOOTSTRAP_DISABLED");
-  }
-  if (!timingSafeEqualHex(await sha256Hex(bearerToken(request) ?? ""), await sha256Hex(bootstrap))) {
-    return bad(403, "BOOTSTRAP_INVALID");
-  }
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return bad(400, "VALIDATION_FAILED");
-  }
-  const executorId = String(body["executor_id"] ?? "");
-  const executionPath = String(body["execution_path"] ?? "");
-  const name = String(body["name"] ?? executorId);
-  const version = String(body["version"] ?? "0.0.0");
-  const capabilities = body["capabilities"];
-  if (!EXECUTOR_ID_RE.test(executorId)) {
-    return bad(400, "VALIDATION_FAILED");
-  }
-  if (!EXECUTION_PATHS.includes(executionPath as ExecutionPath)) {
-    return bad(400, "VALIDATION_FAILED");
-  }
-  if (!Array.isArray(capabilities) || capabilities.some((c) => typeof c !== "string")) {
-    return bad(400, "VALIDATION_FAILED");
-  }
-  const exists = await env.DB.prepare("SELECT id FROM executor_nodes WHERE id = ?")
-    .bind(executorId)
-    .first();
-  if (exists) {
-    return bad(409, "EXECUTOR_EXISTS");
-  }
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const executorToken = btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  const now = Date.now();
-  await env.DB.prepare(
-    "INSERT INTO executor_nodes(id,name,execution_path,token_hash,version,capabilities_json,enabled,status,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'offline',?,?)",
-  )
-    .bind(
-      executorId,
-      name,
-      executionPath,
-      await sha256Hex(executorToken),
-      version,
-      JSON.stringify(capabilities),
-      now,
-      now,
-    )
-    .run();
-  await audit(env.DB, "EXECUTOR_REGISTERED", executorId, executorId);
-  return Response.json(
-    {
-      ok: true,
-      executor_id: executorId,
-      executor_token: executorToken, // 仅此一次显示（计划 §39）
-      note: "store the token locally (Credential Manager / protected file); it cannot be recovered",
-    },
-    { status: 201 },
-  );
 }
 
 /**
