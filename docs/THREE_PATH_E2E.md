@@ -68,9 +68,21 @@
 | 幂等 complete（at-least-once 安全） | LIVE PASS（vitest）：idempotent=true | retry-fencing.spec |
 | 3 executor × N 任务并发 | LIVE PASS（3×3 无重叠） | e2e_recovery_concurrency.py |
 
-## 5. 已知限制（§131 披露）
+## 5. 执行介质（stage-34 更新）
+
+| 端 | 介质 | 真实引擎 |
+| --- | --- | --- |
+| Local | 本机 Windows 常驻 agent（`agent/main.py --runner chaoxing`） | LIVE：fuckCourse/超星真实登录、33 门课实查、暂停/恢复实跑 |
+| Internal | GitHub Actions 服务 `executor-internal`（ubuntu runner，outbound-only HTTPS，每 2h 第 7 分钟起 20 分钟窗口 + 手动 dispatch；固定节点 exec-internal-01，独立 Token 存 repo secrets） | NOT AVAILABLE（Windows 引擎不上 GitHub runner；协议/链路 demo 闭环 LIVE PASS） |
+| External | GitHub Actions 服务 `executor-external`（同上，固定节点 exec-external-01） | NOT AVAILABLE（同上） |
+
+三路 demo 闭环证据：`e2e_three_path_demo.py` → 3/3 PASS（2026-09-24 LIVE，部署 dfaebdec）：
+health → 登录 → 建单 → internal/external 各建 demo.echo 任务 → GitHub runner pull → 执行 → complete → result_json 工件回读校验。
+该 E2E 发现并修复回归：辅助任务（非 `*.run`）完成曾误置订单终态（task-dispatch 白名单修正 + vitest 回归测试）。
+
+## 6. 已知限制（§131 披露）
 
 1. ~~R2 未激活~~ → **已解决**（2026-09-23 激活 + 绑定部署，e2e_artifacts 10/10）。
-2. 真实 fuckCourse/超星引擎未接入 Executor（stage-12 骨架 + demo handler；接入需用户提供引擎凭据并授权）。
-3. Admin 后台 UI（§58）与 admin 商品/用户管理 API 未实现——E2E 商品经 wrangler d1 execute 种子。
-4. Executor 并发多任务（capacity>1）与孤儿进程扫描在真实 runtime 中为骨架态。
+2. 真实 fuckCourse/超星引擎仅在 Local 路径运行（Windows 专属）；Internal/External 为 GitHub ubuntu runner，只有 demo 协议能力（§132 如实标注 NOT AVAILABLE）。
+3. ~~Admin 后台未实现~~ → **已解决**（stage-cloud-33：/api/v1/admin/* + 管理页，vitest admin-api.spec）。
+4. Executor 并发多任务（capacity>1）为骨架态；孤儿扫描见 §115 进展（R5）。

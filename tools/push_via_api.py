@@ -36,9 +36,14 @@ def git(*args: str) -> str:
 
 
 def main() -> None:
-    token = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n",
-                           capture_output=True, text=True).stdout
-    token = token.split("password=", 1)[1].splitlines()[0]
+    # 优先 gh CLI token（可能含 workflow scope；git credential 的 token 可能没有）
+    gh = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
+    if gh.returncode == 0 and gh.stdout.strip():
+        token = gh.stdout.strip()
+    else:
+        token = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n",
+                               capture_output=True, text=True).stdout
+        token = token.split("password=", 1)[1].splitlines()[0]
     base = sys.argv[1]
 
     commits = git("log", f"{base}..HEAD", "--format=%H").splitlines()[::-1]  # oldest first

@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import { applyMigrations } from "./helpers";
+import { applyMigrations, DB } from "./helpers";
 import { adminExecutors } from "../src/admin/admin-service";
 
 // stage-cloud-31 — §58 验收：执行器列表永不泄漏 token_hash（§58 红线）。
@@ -10,7 +10,7 @@ import { adminExecutors } from "../src/admin/admin-service";
 describe("§58 admin API", () => {
   it("执行器列表：输出含能力/在线信息，绝无 token_hash/token 字段", async () => {
     await applyMigrations();
-    await env.DB.prepare(
+    await DB.prepare(
       "INSERT INTO executor_nodes(id,name,execution_path,token_hash,version,capabilities_json,enabled,status,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'offline',?,?)",
     )
       .bind("exec-admin-spec", "spec", "local", "deadbeef", "1.0.0", '["demo"]', Date.now(), Date.now())

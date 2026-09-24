@@ -138,7 +138,7 @@ describe("stage-cloud-16b order/task creation", () => {
       headers: { Cookie: u.cookie },
       body: JSON.stringify({
         execution_path: "internal",
-        task_type: "xuexitong.chapter",
+        task_type: "xuexitong.run",
         required_capabilities: ["xuexitong"],
         payload: { chapter_id: 7 },
       }),
@@ -237,5 +237,43 @@ describe("stage-cloud-16b order/task creation", () => {
       .bind(task_id)
       .first();
     expect(audit).toBeTruthy();
+  });
+
+  it("辅助任务（demo.echo）完成不翻转订单终态（stage-cloud-34 回归：仅 *.run 驱动）", async () => {
+    const u = await mkUser("u16aux");
+    const o = await createOrder(u.cookie);
+    const t = await SELF.fetch(`${BASE}/api/v1/orders/${o.orderId}/tasks`, {
+      method: "POST",
+      headers: { Cookie: u.cookie },
+      body: JSON.stringify({ execution_path: "local", task_type: "demo.echo", payload: {} }),
+    });
+    const { task_id } = (await t.json()) as { task_id: string };
+    const reg = await SELF.fetch(`${BASE}/api/executor/v1/register`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${BOOTSTRAP}` },
+      body: JSON.stringify({ executor_id: "exec-aux-e2e", execution_path: "local", capabilities: ["demo"], version: "1.0.0" }),
+    });
+    const token = ((await reg.json()) as { executor_token: string }).executor_token;
+    const claim = await SELF.fetch(`${BASE}/api/executor/v1/claim`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ executor_id: "exec-aux-e2e", execution_path: "local", capabilities: ["demo"] }),
+    });
+    const d = ((await claim.json()) as { task: Record<string, unknown> }).task!;
+    await SELF.fetch(`${BASE}/api/executor/v1/ack`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ executor_id: "exec-aux-e2e", execution_path: "local", task_id, lease_id: d["lease_id"] }),
+    });
+    await SELF.fetch(`${BASE}/api/executor/v1/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ executor_id: "exec-aux-e2e", execution_path: "local", task_id, lease_id: d["lease_id"], outcome: "succeeded" }),
+    });
+    const task = await DB.prepare("SELECT status FROM tasks WHERE id=?").bind(task_id).first<{ status: string }>();
+    expect(task?.status).toBe("succeeded");
+    // 回归点：辅助任务完成，订单必须仍是 processing（否则无法再入队）
+    const order = await DB.prepare("SELECT status FROM orders WHERE id=?").bind(o.orderId).first<{ status: string }>();
+    expect(order?.status).toBe("processing");
   });
 });
