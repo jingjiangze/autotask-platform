@@ -39,6 +39,9 @@ import {
   adminExecutors,
   adminExecutorToggle,
   adminOrders,
+  adminProductToggle,
+  adminProductUpsert,
+  adminProducts,
   adminStats,
   adminTasks,
   adminUsers,
@@ -130,6 +133,14 @@ export async function route(request: Request, env: Env): Promise<Response | unde
     // stage-cloud-11 遗留端点仍由下方原处理器处理（credentials / orders/by-account）
     if (sub === "credentials" || sub === "orders/by-account") { /* fallthrough */ }
     else {
+    // stage-cloud-37：商品上架管理（§58）
+    const prodToggle = /^products\/([a-z0-9_-]{2,32})\/enabled$/.exec(sub);
+    if (prodToggle && request.method === "POST") return adminProductToggle(env, request, prodToggle[1]!);
+    if (sub === "products") {
+      if (request.method === "GET") return adminProducts(env, request);
+      if (request.method === "POST") return adminProductUpsert(env, request);
+      return errorResponse(405, "METHOD_NOT_ALLOWED");
+    }
     const toggle = /^executors\/([A-Za-z0-9-]+)\/enabled$/.exec(sub);
     if (toggle && request.method === "POST") return adminExecutorToggle(env, request, toggle[1]!);
     if (request.method !== "GET") return errorResponse(405, "METHOD_NOT_ALLOWED");
