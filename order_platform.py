@@ -117,7 +117,10 @@ class RollingLog:
     def _scrub(chunk):
         """日志落盘前对常见明文口令/token/api-key 形态脱敏（仅平台侧写盘，不触碰引擎）"""
         try:
-            s = chunk.decode("utf-8", errors="replace")
+            try:
+                s = chunk.decode("utf-8")  # 新引擎已强制 PYTHONIOENCODING=utf-8
+            except UnicodeDecodeError:
+                s = chunk.decode("gbk", errors="replace")  # 兼容旧引擎的 GBK 输出
             s = re.sub(r"(?i)(password|pwd|passwd|token|api[_-]?key|secret|authorization)\s*([=:])\s*([^\s,;]+)",
                        r"\1\2****", s)
             return s.encode("utf-8", errors="replace")
@@ -179,6 +182,10 @@ def init_db():
             note TEXT DEFAULT '', qr_state TEXT DEFAULT '',
             created_at TEXT, started_at TEXT, finished_at TEXT,
             exit_code INTEGER, worker_running INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS course_names(
+            cid TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now','localtime')));
         CREATE TABLE IF NOT EXISTS products(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE, name TEXT, desc TEXT, price TEXT,
@@ -187,7 +194,8 @@ def init_db():
         for col, ddl in [("product", "TEXT DEFAULT ''"), ("env_profile", "TEXT DEFAULT ''"),
                          ("risk_flags", "TEXT DEFAULT ''"), ("speed", "REAL DEFAULT 0"),
                          ("pid", "INTEGER DEFAULT 0"), ("attempt", "INTEGER DEFAULT 0"),
-                         ("heartbeat_at", "TEXT DEFAULT ''")]:
+                         ("heartbeat_at", "TEXT DEFAULT ''"),
+                         ("paused", "INTEGER DEFAULT 0"), ("priority", "INTEGER DEFAULT 0")]:
             try:
                 c.execute(f"ALTER TABLE orders ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -271,6 +279,23 @@ def _kill_tree(pid):
             return True
         time.sleep(0.5)
     return not _pid_alive(pid)
+
+def _suspend_resume_process(pid, suspend):
+    """挂起/恢复整个引擎子进程（NtSuspendProcess/NtResumeProcess，进度零丢失）"""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        ntdll = ctypes.windll.ntdll
+        h = k32.OpenProcess(0x0800, False, int(pid))  # PROCESS_SUSPEND_RESUME
+        if not h:
+            return False
+        try:
+            r = ntdll.NtSuspendProcess(h) if suspend else ntdll.NtResumeProcess(h)
+            return r == 0
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return False
 
 def ensure_admin_password():
     """安全兜底：仅当管理员口令仍为默认 admin123 时重置为随机口令并写入 secrets_store"""
@@ -606,6 +631,7 @@ def build_order_env(oid, o):
     env["OPENBLAS_NUM_THREADS"] = "1"
     env["MKL_NUM_THREADS"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"  # 子进程 stdout/stderr 强制 UTF-8，防管道 GBK 乱码
     env["WK_UA"] = ua
     env["WK_PLATFORM"] = plat
     env["WK_CHUA"] = chua
@@ -646,6 +672,168 @@ def scan_risk(oid):
         if any(k.lower() in raw for k in kws):
             hits.append(name)
     return ",".join(hits)
+
+def progress_evidence(oid):
+    """从超星引擎日志提取服务端任务点完成比例（如 195/195）与进度条宽度，
+    写入订单备注作为客服对账证据（应对'App 里进度 0%'类投诉）"""
+    p = os.path.join(order_dir(oid), "logs", "chaoxing.log")
+    if not os.path.exists(p):
+        return ""
+    try:
+        raw = open(p, "rb").read()[-800 * 1024:].decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    m = re.search(r"已完成任务点:\s*(?:<[^>]+>)?(\d+)(?:</span>)?/(\d+)", raw)
+    if not m:
+        return ""
+    done, total = m.group(1), m.group(2)
+    w = re.search(r'catalog_ressbar_width"\s+style="width:([\d.]+)%', raw)
+    pct = f" ({w.group(1)}%)" if w else ""
+    return f"[进度] {done}/{total}{pct}"
+
+def order_eta(oid):
+    """基于引擎日志估算运行中订单进度，返回 dict(done, total, eta_min) 或 None。
+    eta 按"已完成任务事件 / 已运行分钟"的速率外推，多班级课程为近似值。"""
+    p = os.path.join(order_dir(oid), "logs", "chaoxing.log")
+    if not os.path.exists(p):
+        return None
+    try:
+        raw = open(p, "rb").read()[-2 * 1024 * 1024:].decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    total = None
+    for m in re.finditer(r"已完成任务点:\s*(?:<[^>]+>)?(\d+)(?:</span>)?/(\d+)", raw):
+        total = int(m.group(2))
+    done = len(re.findall(r"任务完成:", raw)) + len(re.findall(r"任务瞬间完成:", raw))
+    return {"done": done, "total": total}
+
+def eta_text(oid, started_at):
+    """运行中订单的预计剩余时间文案（无法估算时返回空）"""
+    st = order_eta(oid)
+    if not st or not st.get("total") or not started_at:
+        return ""
+    try:
+        elapsed = (datetime.now() - datetime.fromisoformat(started_at)).total_seconds() / 60
+    except Exception:
+        return ""
+    if elapsed <= 0 or st["done"] <= 0:
+        return "预计剩余：统计中"
+    rate = st["done"] / elapsed  # 任务/分钟
+    remain = max(st["total"] - st["done"], 0)
+    eta = remain / rate
+    if eta < 1:
+        return "预计剩余：<1 分钟"
+    if eta < 60:
+        return f"预计剩余：约 {eta:.0f} 分钟"
+    return f"预计剩余：约 {eta / 60:.1f} 小时"
+
+def _fmt_minutes(m):
+    if m < 1:
+        return "不足 1 分钟"
+    if m < 60:
+        return f"约 {m:.0f} 分钟"
+    return f"约 {m / 60:.1f} 小时"
+
+def account_finish_estimate(account):
+    """估算该账号全部订单刷完的粗略时间。
+    口径：进行中订单取各自 ETA 的最大值；排队单按 并发数分波、
+    波均时长取进行中订单 ETA 均值近似（排队单若多为已完成课程的秒级核查会偏保守）。"""
+    with db() as c:
+        running = c.execute("SELECT id, started_at FROM orders WHERE account=? AND status='running'",
+                            (account,)).fetchall()
+        n_pend = c.execute("SELECT COUNT(*) n FROM orders WHERE account=? AND status='pending'",
+                           (account,)).fetchone()["n"]
+    if not running and not n_pend:
+        return ""
+    etas_min = []
+    for r in running:
+        st = order_eta(r["id"])
+        if st and st.get("total") and st["done"] > 0 and r["started_at"]:
+            try:
+                el = (datetime.now() - datetime.fromisoformat(r["started_at"])).total_seconds() / 60
+                if el > 0:
+                    etas_min.append(max(st["total"] - st["done"], 0) / (st["done"] / el))
+            except Exception:
+                pass
+    cur_wave = max(etas_min) if etas_min else 0.0
+    avg_order = (sum(etas_min) / len(etas_min)) if etas_min else 0.0
+    try:
+        conc = max(1, min(MAX_CONCURRENCY, int(get_setting("concurrency", "4"))))
+    except Exception:
+        conc = 4
+    waves = (n_pend + conc - 1) // conc
+    total = cur_wave + waves * avg_order
+    parts = []
+    if running:
+        parts.append(f"进行中 {len(running)} 单（最长 {_fmt_minutes(cur_wave)}）")
+    if n_pend:
+        parts.append(f"排队 {n_pend} 单")
+    if total > 0:
+        parts.append(f"<b class='text-blue'>全部刷完粗略预计 {_fmt_minutes(total)}</b>"
+                     f"<br><span class='text-secondary'>（排队按 {conc} 路并发分波、波均 {_fmt_minutes(avg_order)} 近似；"
+                     f"排队单若多为已完成课程的快速核查，实际会更快）</span>")
+    elif not n_pend:
+        parts.append("全部刷完粗略预计：" + _fmt_minutes(cur_wave))
+    if not parts:
+        return "ETA 统计中（进行中订单完成首个任务后自动估算全部剩余时间）"
+    return " · ".join(parts)
+
+def queue_position(oid):
+    """pending 单的排队位次（1 起）"""
+    try:
+        with db() as c:
+            row = c.execute("SELECT created_at FROM orders WHERE id=?", (oid,)).fetchone()
+            if not row:
+                return None
+            n = c.execute("SELECT COUNT(*) n FROM orders WHERE status='pending' AND created_at < ?",
+                          (row["created_at"],)).fetchone()["n"]
+            return n + 1
+    except Exception:
+        return None
+
+def _detail_eta(o):
+    """订单详情页"预计"栏"""
+    if o.get("status") == "running":
+        return eta_text(o["id"], o.get("started_at")) or "统计中（首个任务完成后可见）"
+    if o.get("status") == "pending":
+        pos = queue_position(o["id"])
+        if pos:
+            return f"排队第 {pos} 位，开始执行后此处显示预计剩余"
+    return '<span class="text-secondary">—</span>'
+
+def upsert_course_names(pairs):
+    """批量更新 courseId→课程名 映射（pairs: [{"id","name"}, ...]）"""
+    if not pairs:
+        return
+    try:
+        with db() as c:
+            c.executemany("INSERT INTO course_names(cid,title) VALUES(?,?) "
+                          "ON CONFLICT(cid) DO UPDATE SET title=excluded.title, "
+                          "updated_at=datetime('now','localtime')",
+                          [(str(p["id"]), p["name"]) for p in pairs if p.get("id") and p.get("name")])
+    except Exception:
+        pass
+
+def courses_display(courses):
+    """订单 courses 字段转可读课程名（多个用 、 连接；映射缺失时回退显示 ID）"""
+    if not courses or not courses.strip():
+        cids = ["264628209"]  # 引擎默认课程
+        suffix = "（默认）"
+    elif courses.strip().lower() == "all":
+        return "全部课程"
+    else:
+        cids = [x.strip() for x in re.split(r"[,\s]+", courses) if x.strip()]
+        suffix = ""
+    try:
+        with db() as c:
+            rows = c.execute(f"SELECT cid,title FROM course_names WHERE cid IN "
+                             f"({','.join('?' * len(cids))})", cids).fetchall()
+        m = {r["cid"]: r["title"] for r in rows}
+    except Exception:
+        m = {}
+    parts = [m.get(cid, f"课程{cid}") for cid in cids]
+    shown = "、".join(parts[:6]) + ("…" if len(parts) > 6 else "")
+    return shown + suffix
 
 # ================= 任务引擎 =================
 def _spawn(cmd, env, cwd, log_path, oid=None):
@@ -725,7 +913,7 @@ def claim_order():
     try:
         with db() as c:
             row = c.execute("SELECT * FROM orders WHERE status='pending' AND worker_running=0 "
-                            "ORDER BY created_at LIMIT 1").fetchone()
+                            "ORDER BY priority DESC, created_at LIMIT 1").fetchone()
             if row is None:
                 return None
             cur = c.execute("UPDATE orders SET worker_running=1, status='running', started_at=?, "
@@ -759,8 +947,18 @@ def worker(wid=0):
             env, work, profile = build_order_env(oid, o)
             set_order(oid, env_profile=json.dumps(profile, ensure_ascii=False))
             rc = run_chaoxing(oid, o, env, work) if o["platform"] == "chaoxing" else run_zhs(oid, o, env, work)
+            # 状态守卫：执行期间被用户取消的单，跳过收尾（保留 canceled），只清 worker 标记
+            try:
+                with db() as c:
+                    cur = c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()
+                if cur and cur["status"] == "canceled":
+                    set_order(oid, worker_running=0, pid=0)
+                    continue
+            except Exception:
+                pass
             risk = scan_risk(oid)
-            env_txt = f"[环境] {profile['platform']} · 出口 {profile['proxy']}"
+            prog = progress_evidence(oid) if o["platform"] == "chaoxing" else ""
+            env_txt = f"[环境] {profile['platform']} · 出口 {profile['proxy']}" + (f" · {prog}" if prog else "")
             finished = now_str()
             if rc == 0:
                 safe_set_order(oid, status="done", finished_at=finished,
@@ -930,6 +1128,15 @@ threading.Thread(target=housekeeping, daemon=True).start()
 app = Flask(__name__)
 app.secret_key = SECRET
 
+QACC_HOST = "chaxun.jiangjiangze.icu"  # 查单专用域名（CF Tunnel 独立 ingress）
+
+@app.before_request
+def _qacc_host_gate():
+    """查单专用域名：只放行 /qacc，其余一律导回查单页（查询站与主站域名隔离）"""
+    h = (request.host or "").lower().split(":")[0]
+    if h == QACC_HOST and request.path != "/qacc":
+        return redirect("/qacc")
+
 @app.before_request
 def _csrf_guard():
     """全站 POST 跨站防护：所有状态变更接口统一校验同源"""
@@ -952,6 +1159,31 @@ def esc(v):
 
 def badge(st):
     return f'<span class="badge {BADGE_CLS.get(st, "bg-secondary-lt")} me-1"></span>{BADGE.get(st, st)}'
+
+def status_badge(o):
+    """状态徽章（含暂停态叠加）"""
+    extra = ' <span class="badge bg-orange-lt">已暂停</span>' if o.get("paused") and o["status"] == "running" else ""
+    return badge(o["status"]) + extra
+
+def order_action_buttons(o, small=True):
+    """订单操作按钮：暂停/恢复/取消/优先（按状态渲染）"""
+    cls = "btn-sm " if small else ""
+    oid = o["id"]
+    btns = []
+    if o["status"] == "running" and not o.get("paused"):
+        btns.append(f'<form method="post" action="/order/{oid}/pause" class="d-inline">'
+                    f'<button class="btn btn-outline-warning {cls}" title="挂起引擎进程，进度保留，可随时恢复">⏸ 暂停</button></form>')
+    if o["status"] == "running" and o.get("paused"):
+        btns.append(f'<form method="post" action="/order/{oid}/resume" class="d-inline">'
+                    f'<button class="btn btn-outline-success {cls}">▶ 恢复</button></form>')
+    if o["status"] in ("pending", "running", "waiting_qr"):
+        btns.append(f'<form method="post" action="/order/{oid}/cancel" class="d-inline" '
+                    f'onsubmit="return confirm(\'确定取消该订单？运行中的任务会立即终止\')">'
+                    f'<button class="btn btn-outline-danger {cls}">✖ 取消</button></form>')
+    if o["status"] == "pending":
+        btns.append(f'<form method="post" action="/order/{oid}/priority" class="d-inline">'
+                    f'<button class="btn btn-outline-info {cls}">⏫ 优先</button></form>')
+    return "".join(btns)
 
 def _env_txt(o):
     """订单环境画像展示"""
@@ -1012,7 +1244,7 @@ __BODY__
     </div>
   </div>
 </div>
-<footer>自动任务平台 · 本地部署 · 引擎 fuckCourse · 可经 Cloudflare Tunnel 发布</footer>
+<footer>自动任务平台 · 仅供个人本地测试与学习研究使用 · 不提供对外服务 · 进度数据仅供参考，一切以学习平台官方为准 · 使用即视为知悉并接受全部免责条款</footer>
 </div>
 <script src="/static/vendor/js/tabler.min.js"></script>
 <div class="toast position-fixed bottom-0 end-0 m-3" id="toast" style="z-index:99">
@@ -1094,6 +1326,7 @@ def _query_courses(platform, account, password, cookie_path):
     """查询实现（内层）"""
     args = [PYEXE, QUERY_TOOL]
     qenv = os.environ.copy()
+    qenv["PYTHONIOENCODING"] = "utf-8"  # 防 GBK 管道编码崩溃（\xa0 等）
     qenv["WK_ACCOUNT"] = account
     qenv["WK_PASSWORD"] = password
     if platform == "chaoxing":
@@ -1326,6 +1559,8 @@ def api_courses(user):
         return jsonify(ok=False, error="请先填写账号和密码")
     ok, res = query_courses(platform, account, password)
     if ok:
+        if platform == "chaoxing" and isinstance(res, list):
+            upsert_course_names(res)  # 查课时顺手更新 courseId→课程名 映射
         return jsonify(ok=True, courses=res)
     return jsonify(ok=False, error=res)
 
@@ -1406,8 +1641,57 @@ def query():
 <div class="row justify-content-center"><div class="col-lg-6"><div class="card"><div class="card-body">
 <form method="post"><label class="form-label">订单号（完整或前 8 位）</label>
 <input class="form-control" name="oid" placeholder="例如: 23b0e7f1">
-<button class="btn btn-primary w-100 mt-2">查询</button></form></div></div></div></div>{result}"""
+<button class="btn btn-primary w-100 mt-2">查询</button></form></div></div></div></div>{result}
+<p class="text-center mt-3"><a class="btn btn-outline-secondary btn-sm" href="/qacc">📋 按账号查单（管理员）</a></p>"""
     return page("查单", body, user, "query")
+
+# ---- 按账号查单（独立网址，公开访问，带限流防刷）----
+@app.route("/qacc", methods=["GET", "POST"])
+def query_by_account():
+    user = current_user()
+    if not rate_limit("qacc", 20):
+        return page("错误", """<div class="empty"><div class="empty-header">⏳</div>
+<p class="empty-title">查询过于频繁</p><p class="empty-subtitle text-secondary">请稍后再试</p></div>""", user)
+    rows, q, etas = [], "", {}
+    if request.method == "POST":
+        q = request.form.get("acc", "").strip()
+        if q:
+            with db() as c:
+                rows = c.execute("SELECT o.*,p.name pname FROM orders o LEFT JOIN products p ON p.code=o.product "
+                                 "WHERE o.account=? ORDER BY o.created_at DESC", (q,)).fetchall()
+            rows = [dict(r) for r in rows]
+            for r in rows:
+                if r["status"] == "running":
+                    etas[r["id"]] = eta_text(r["id"], r["started_at"])
+    detail_btn = '<a class="btn btn-sm btn-outline-primary" href="/order/{id}">详情</a>' if user else ""
+    batch_est = account_finish_estimate(q) if (rows and q) else ""
+    tr = "".join(f"""<tr><td class="text-muted">{r['id'][:8]}</td>
+<td>{esc(r['pname']) or esc(r['product'])}<br><span class="text-secondary small">{esc(courses_display(r['courses']))}</span></td><td>{badge(r['status'])}</td>
+<td class="text-secondary">{esc(r['note'])}{'<br><b class="text-blue">' + etas[r['id']] + '</b>' if etas.get(r['id']) else ''}</td>
+<td class="text-secondary">{r['created_at']} → {r['finished_at'] or '…'}</td>
+<td>{detail_btn.format(id=r['id'])}</td></tr>""" for r in rows)
+    result = f"""<div class="card mt-3"><div class="table-responsive"><table class="table table-vcenter card-table">
+<thead><tr><th>单号</th><th>商品</th><th>状态</th><th>备注 / 预计</th><th>时间</th><th></th></tr></thead>
+<tbody>{tr}</tbody></table></div></div>""" if rows else (
+        f"""<div class="empty mt-3"><div class="empty-header">🔍</div><p class="empty-title">未找到订单</p>
+<p class="empty-subtitle text-secondary">账号 {esc(q)} 没有任何订单记录</p></div>""" if q else "")
+    body = f"""<div class="page-header"><h2 class="page-title">📋 按账号查单</h2></div>
+<div class="row justify-content-center"><div class="col-lg-7"><div class="card"><div class="card-body">
+<form method="post"><label class="form-label">账号（手机号）</label>
+<input class="form-control" name="acc" value="{esc(q)}" placeholder="例如: 13800000000">
+<button class="btn btn-primary w-100 mt-2">查询该账号全部订单</button></form></div></div></div></div>
+{f'<div class="card mt-2"><div class="card-body py-2">⏱ 整批进度：{batch_est}</div></div>' if batch_est else ''}{result}
+<div class="card mt-3"><div class="card-body">
+<h3 class="card-title">⚠️ 声明与免责条款</h3>
+<ul class="text-secondary small mb-0" style="line-height:1.9">
+<li>本系统<b>仅供个人本地测试与学习研究使用</b>，不对外提供任何商业服务，不承诺任何可用性。</li>
+<li>页面展示的进度数据来自第三方平台页面解析，<b>仅供参考</b>，不作为任何成绩、学分或结业依据；一切以学习平台官方显示为准。</li>
+<li>所有数据仅存于本机，<b>随时可能被清除或重置</b>，不作任何持久化与备份承诺。</li>
+<li>因使用本系统产生的一切行为及后果由使用者本人承担，与开发者、部署者无关。</li>
+<li>使用者应自行遵守所在学校规章制度、第三方平台用户协议及相关法律法规。</li>
+<li>查询结果不包含任何密码或敏感凭据；如对数据有异议，请联系管理员。</li>
+</ul></div></div>"""
+    return page("按账号查单", body, user, "query")
 
 # ---- 我的订单 ----
 @app.route("/my")
@@ -1416,21 +1700,142 @@ def my_orders(user):
     with db() as c:
         rows = c.execute("SELECT o.*,p.name pname FROM orders o LEFT JOIN products p ON p.code=o.product WHERE o.user_id=? ORDER BY o.created_at DESC", (user["id"],)).fetchall()
     if rows:
-        tr = "".join(f"""<tr><td class="text-muted">{r['id'][:8]}</td>
-<td>{PICON.get(r['platform'],'⚙')} {esc(r['pname']) or esc(r['product'])}</td>
-<td>{esc(r['account']) or '(扫码)'}</td><td>{badge(r['status'])}</td>
-<td class="text-secondary">{esc(r['note'])}</td>
+        def _row_html(r, compact=False):
+            pw = decrypt_secret(r["password"]) if r["password"] else ""
+            pw_cell = esc(pw) if pw else '<span class="text-secondary">—</span>'
+            eta_cell = ""
+            if r["status"] == "running":
+                t = eta_text(r["id"], r.get("started_at"))
+                if t:
+                    eta_cell = f'<br><span class="small text-blue">{t}</span>'
+            elif r["status"] == "pending":
+                pos = queue_position(r["id"])
+                if pos:
+                    eta_cell = f'<br><span class="small text-secondary">排队第 {pos} 位</span>'
+            reorder = ""
+            if r["platform"] == "chaoxing" and r["account"]:
+                reorder = (f"""<form method="post" action="/my/{r['id']}/reorder" class="d-inline"
+                              onsubmit="return confirm('按此单的账号/密码/课程重新下一单？')">
+                              <button class="btn btn-sm btn-outline-success">🔁 重下</button></form>""")
+            return f"""<tr><td class="text-muted">{r['id'][:8]}</td>
+<td>{PICON.get(r['platform'],'⚙')} {esc(r['pname']) or esc(r['product'])}<br><span class="text-secondary small">{esc(courses_display(r['courses']))}</span></td>
+<td>{esc(r['account']) or '(扫码)'}</td><td class="font-monospace small">{pw_cell}</td>
+<td>{status_badge(r)}{eta_cell}</td><td class="text-secondary">{esc(r['note'])}</td>
 <td class="text-secondary">{r['created_at']} → {r['finished_at'] or '…'}</td>
-<td><a class="btn btn-sm btn-outline-primary" href="/order/{r['id']}">详情</a></td></tr>""" for r in rows)
-        body = f"""<div class="page-header d-print-none"><h2 class="page-title">📒 我的订单</h2></div>
+<td><a class="btn btn-sm btn-outline-primary" href="/order/{r['id']}">详情</a> {reorder} {order_action_buttons(r)}</td></tr>"""
+
+        # 按账号分组：同账号多单合并为可展开分组
+        groups, singles = {}, []
+        for r in rows:
+            r = dict(r)
+            key = r["account"] or "(扫码)"
+            groups.setdefault(key, []).append(r)
+        # 保留时间倒序的分组顺序（按组内最新订单时间）
+        grouped_html = []
+        for acc, items in groups.items():
+            if len(items) == 1:
+                grouped_html.append(_row_html(items[0]))
+                continue
+            latest = items[0]
+            done_n = sum(1 for i in items if i["status"] == "done")
+            inner = "".join(_row_html(i) for i in items)
+            grouped_html.append(f"""<tr><td colspan="8" class="p-0">
+<details><summary class="p-2" style="cursor:pointer">
+<b>{PICON.get(latest['platform'],'⚙')} {esc(acc)}</b>
+<span class="badge bg-blue-lt ms-2">{len(items)} 单</span>
+<span class="badge bg-green-lt">{done_n} 完成</span>
+<span class="text-secondary small ms-2">最近 {latest['created_at']} · 点击展开</span>
+</summary>
+<div class="table-responsive"><table class="table table-sm table-vcenter mb-0">
+<thead><tr><th>单号</th><th>商品</th><th>账号</th><th>密码</th><th>状态</th><th>备注</th><th>时间</th><th></th></tr></thead>
+<tbody>{inner}</tbody></table></div></details></td></tr>""")
+        accounts = [a for a in groups if a not in ("(扫码)",) and a.strip()]
+        banner = "".join(f"""<div class="card card-sm mt-2"><div class="card-body py-2">
+<span class="text-secondary small">⏱ {esc(acc)}：</span>{account_finish_estimate(acc)}</div></div>"""
+                         for acc in accounts if account_finish_estimate(acc))
+        body = f"""<div class="page-header d-print-none"><h2 class="page-title">📒 我的订单</h2>
+<p class="text-secondary small mb-0">同账号多单已合并分组，点击展开；密码明文仅本人可见</p></div>{banner}
 <div class="card"><div class="table-responsive"><table class="table table-vcenter card-table">
-<thead><tr><th>单号</th><th>商品</th><th>账号</th><th>状态</th><th>备注</th><th>时间</th><th></th></tr></thead>
-<tbody>{tr}</tbody></table></div></div>"""
+<thead><tr><th>单号 / 分组</th><th colspan="7"></th></tr></thead>
+<tbody>{''.join(grouped_html)}</tbody></table></div></div>
+<script>document.querySelectorAll('form[action$="/reorder"]').forEach(function(f){{
+f.addEventListener('submit', function(){{ var b=f.querySelector('button'); b.disabled=true; b.textContent='已提交…'; }});}});</script>"""
     else:
         body = """<div class="empty"><div class="empty-header">📭</div>
 <p class="empty-title">还没有订单</p><p class="empty-subtitle text-secondary">选择一个商品，立即开始自动化</p>
 <div class="empty-action"><a class="btn btn-primary" href="/">去下单</a></div></div>"""
     return page("我的订单", body, user, "my")
+
+@app.route("/my/<oid>/reorder", methods=["POST"])
+@require_login
+def order_reorder(user, oid):
+    """一键重复下单：复制原单的账号/密码/商品/课程，生成新的 pending 订单"""
+    with db() as c:
+        o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o or (not user["is_admin"] and o["user_id"] != user["id"]):
+        return jsonify(ok=False, error="订单不存在")
+    if o["platform"] != "chaoxing" or not o["account"]:
+        return jsonify(ok=False, error="该订单不支持一键重下（仅支持账号密码类超星订单）")
+    nid = uuid.uuid4().hex
+    with db() as c:
+        c.execute("INSERT INTO orders(id,user_id,platform,account,password,courses,status,product,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (nid, user["id"], o["platform"], o["account"], o["password"], o["courses"], "pending", o["product"], now_str()))
+    return redirect("/my")
+
+# ---- 订单控制：暂停 / 恢复 / 取消 / 优先 ----
+def _own_order(user, oid):
+    with db() as c:
+        o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o or (not user["is_admin"] and o["user_id"] != user["id"]):
+        return None
+    return o
+
+@app.route("/order/<oid>/pause", methods=["POST"])
+@require_login
+def order_pause(user, oid):
+    """暂停运行中的订单：挂起引擎进程（进度零丢失），可一键恢复"""
+    o = _own_order(user, oid)
+    if not o or o["status"] != "running" or o["paused"] or not o["pid"]:
+        return redirect(request.referrer or "/my")
+    if _suspend_resume_process(o["pid"], suspend=True):
+        set_order(oid, paused=1)
+    return redirect(request.referrer or "/my")
+
+@app.route("/order/<oid>/resume", methods=["POST"])
+@require_login
+def order_resume(user, oid):
+    """恢复已暂停的订单"""
+    o = _own_order(user, oid)
+    if not o or o["status"] != "running" or not o["paused"] or not o["pid"]:
+        return redirect(request.referrer or "/my")
+    _suspend_resume_process(o["pid"], suspend=False)
+    set_order(oid, paused=0)
+    return redirect(request.referrer or "/my")
+
+@app.route("/order/<oid>/cancel", methods=["POST"])
+@require_login
+def order_cancel(user, oid):
+    """取消订单：排队单直接标记；运行中单杀进程树（worker 状态守卫保留 canceled）"""
+    o = _own_order(user, oid)
+    if not o or o["status"] not in ("pending", "running", "waiting_qr"):
+        return redirect(request.referrer or "/my")
+    if o["status"] == "running" and o["pid"]:
+        _kill_tree(o["pid"])
+    set_order(oid, status="canceled", finished_at=now_str(),
+              worker_running=0, pid=0, paused=0, heartbeat_at="")
+    return redirect(request.referrer or "/my")
+
+@app.route("/order/<oid>/priority", methods=["POST"])
+@require_login
+def order_priority(user, oid):
+    """优先这一单：插队到队列最前"""
+    o = _own_order(user, oid)
+    if not o or o["status"] != "pending":
+        return redirect(request.referrer or "/my")
+    with db() as c:
+        top = c.execute("SELECT COALESCE(MAX(priority),0) m FROM orders").fetchone()["m"]
+    set_order(oid, priority=top + 1)
+    return redirect(request.referrer or "/my")
 
 # ---- 订单详情 ----
 @app.route("/order/<oid>")
@@ -1475,11 +1880,13 @@ if(j.state==='confirmed')location.reload();}},1500)
 <div class="datagrid">
 <div class="datagrid-item"><div class="datagrid-title">商品</div><div class="datagrid-content">{esc(o['pname']) or esc(o['product'])}</div></div>
 <div class="datagrid-item"><div class="datagrid-title">账号</div><div class="datagrid-content">{esc(o['account']) or '(扫码授权)'}</div></div>
-<div class="datagrid-item"><div class="datagrid-title">课程</div><div class="datagrid-content">{esc(o['courses']) or '全部'}</div></div>
+<div class="datagrid-item"><div class="datagrid-title">课程</div><div class="datagrid-content">{esc(courses_display(o['courses']))}<br><span class="text-secondary small">ID: {esc(o['courses']) or '默认'}</span></div></div>
 <div class="datagrid-item"><div class="datagrid-title">备注</div><div class="datagrid-content">{esc(o['note']) or '-'}</div></div>
+<div class="datagrid-item"><div class="datagrid-title">预计</div><div class="datagrid-content">{_detail_eta(o)}</div></div>
 <div class="datagrid-item"><div class="datagrid-title">运行环境</div><div class="datagrid-content">{_env_txt(o)}</div></div>
 <div class="datagrid-item"><div class="datagrid-title">风控信号</div><div class="datagrid-content">{('<span class="badge bg-red-lt">' + esc(o['risk_flags']) + '</span>') if o.get('risk_flags') else '<span class="text-secondary">无</span>'}</div></div>
-</div></div></div>
+</div>
+<div class="mt-2">{order_action_buttons(o, small=False)}</div></div></div>
 {qr_block}
 <div class="card mt-1"><div class="card-header"><h3 class="card-title">执行日志</h3></div>
 <div class="log-console">{esc(log_tail)}</div></div>{auto}"""
@@ -1547,7 +1954,7 @@ def admin(user):
     with db() as c:
         stats = {r["status"]: r["n"] for r in c.execute("SELECT status,COUNT(*) n FROM orders GROUP BY status").fetchall()}
         users = c.execute("SELECT id,username,is_admin,created_at FROM users").fetchall()
-        running = c.execute("SELECT * FROM orders WHERE status='running'").fetchall()
+        running = [dict(r) for r in c.execute("SELECT * FROM orders WHERE status='running'")]
         recent = c.execute("SELECT o.*,u.username,p.name pname FROM orders o LEFT JOIN users u ON u.id=o.user_id LEFT JOIN products p ON p.code=o.product ORDER BY o.created_at DESC LIMIT 10").fetchall()
     g = lambda k: stats.get(k, 0)
     total = sum(stats.values()) or 1

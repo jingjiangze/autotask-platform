@@ -221,11 +221,19 @@ def start_platform():
 
 
 def cloudflared_running():
+    """只认 wk 隧道自己的进程（命令行含 wk_config.yml）。
+
+    修复 2026-09-24：原实现用 tasklist 只查"存在任意 cloudflared.exe"，
+    同机并行的其他隧道（gdq）会让守护误判 wk 隧道存活而永不拉起，
+    表现为域名 530/1033（Argo Tunnel error）。
+    """
     try:
-        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq cloudflared.exe"],
-                           capture_output=True, text=True, errors="replace",
-                           creationflags=CREATE_NO_WINDOW, timeout=15)
-        return "cloudflared.exe" in (r.stdout or "")
+        r = subprocess.run(
+            ["wmic", "process", "where", "name='cloudflared.exe'",
+             "get", "CommandLine"],
+            capture_output=True, text=True, errors="replace",
+            creationflags=CREATE_NO_WINDOW, timeout=15)
+        return "wk_config.yml" in (r.stdout or "")
     except Exception:
         return False
 
@@ -238,7 +246,7 @@ def start_cloudflared():
     lf = open(CFLOG, "ab")
     # --metrics 暴露本机只读指标口，供 tunnel_healthy() 做连接级判定
     return subprocess.Popen([CFD, "tunnel", "--config", CFG, "--no-autoupdate",
-                             "--metrics", "127.0.0.1:20241", "run", "wk-platform"],
+                             "--metrics", "127.0.0.1:20241", "run"],
                             stdout=lf, stderr=subprocess.STDOUT, env=env,
                             creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
 

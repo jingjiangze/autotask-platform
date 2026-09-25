@@ -273,3 +273,10 @@ orders 表 created_at/started_at/finished_at 存量 57 项补全年份（+2026-�
 新增模块：path_manager.py（逻辑路径统一，基于 __file__）、crypto_manager.py（AES-256-GCM + scrypt KDF + KEK/DEK + Credential Manager + Recovery + 错误分类）；tests/test_crypto_bundle.py（13 项密码学单测 PASS）。
 新增文档：ARCHITECTURE_AUDIT_QWEB / PATH_AUDIT / FILE_CLASSIFICATION / CACHE_CLASSIFICATION / CRYPTO_DESIGN / MIGRATION_PLAN（全部基于真实读取）。
 状态：Q 盘未挂载（OpenList 缺失）——按用户决策先落地本地基建；sync_manager / SQLite 加密备份 / migration_manager 待 Q 挂载后执行。
+
+
+## 2026-09-25 封盘同步
+- health_manager.py：修复 wk 隧道存活误判（仅命令行含 wk_config.yml 的 cloudflared 才算存活，
+  避免同机其他隧道干扰导致域名 530/1033）
+- order_platform.py：引擎输出 GBK 兼容、course_names 缓存表、引擎挂起/恢复（进度零丢失）与队列优先级
+- MAA 看板与夜间自动化已独立成库：jingjiangze/maa-status-board（09-22~25 全量变更记录见其 docs/）
